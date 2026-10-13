@@ -27,7 +27,7 @@ pub const MAX_MCP_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 fn string<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
     args.get(key)
         .and_then(Value::as_str)
-        .ok_or_else(|| Error(format!("{key} must be a string")))
+        .ok_or_else(|| Error::new(format!("{key} must be a string")))
 }
 
 fn optional_tokens(args: &Value, key: &str) -> Result<Option<u64>> {
@@ -35,7 +35,7 @@ fn optional_tokens(args: &Value, key: &str) -> Result<Option<u64>> {
         .map(|value| {
             value
                 .as_u64()
-                .ok_or_else(|| Error(format!("{key} must be a nonnegative 64-bit integer")))
+                .ok_or_else(|| Error::new(format!("{key} must be a nonnegative 64-bit integer")))
         })
         .transpose()
 }
@@ -43,7 +43,7 @@ fn optional_tokens(args: &Value, key: &str) -> Result<Option<u64>> {
 fn validate_id(value: &str, prefix: &str, key: &str) -> Result<()> {
     let suffix = value.strip_prefix(prefix).unwrap_or("");
     if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(Error(format!("{key} must match {prefix}[0-9]+")));
+        return Err(Error::new(format!("{key} must match {prefix}[0-9]+")));
     }
     Ok(())
 }
@@ -64,18 +64,18 @@ fn fields(tool: &str) -> Result<(&'static [&'static str], &'static [&'static str
         ),
         "timeline_branches" => (&[], &[]),
         "timeline_archive_check" | "timeline_archive_branch" => (&["branch"], &[]),
-        _ => return Err(Error("unknown timeline tool".into())),
+        _ => return Err(Error::new("unknown timeline tool".into())),
     })
 }
 
 pub fn validate_arguments(tool: &str, args: &Value) -> Result<()> {
     let object = args
         .as_object()
-        .ok_or_else(|| Error("arguments must be an object".into()))?;
+        .ok_or_else(|| Error::new("arguments must be an object".into()))?;
     let (required, optional) = fields(tool)?;
     for key in required {
         if !object.contains_key(*key) {
-            return Err(Error(format!("missing required argument: {key}")));
+            return Err(Error::new(format!("missing required argument: {key}")));
         }
     }
     if tool != "timeline_create" {
@@ -87,7 +87,7 @@ pub fn validate_arguments(tool: &str, args: &Value) -> Result<()> {
             && key != "idempotency_key"
             && !(key == "timeline_id" && tool != "timeline_create")
         {
-            return Err(Error(format!("unknown argument: {key}")));
+            return Err(Error::new(format!("unknown argument: {key}")));
         }
         match key.as_str() {
             "tokens" | "max_tokens" => {
@@ -97,26 +97,26 @@ pub fn validate_arguments(tool: &str, args: &Value) -> Result<()> {
             "name" | "branch" => {
                 let name = string(args, key)?;
                 if name.is_empty() || name.contains('/') {
-                    return Err(Error(
+                    return Err(Error::new(
                         "branch name must be nonempty and cannot contain /".into(),
                     ));
                 }
             }
             "role" => {
                 if !["user", "assistant", "system", "summary"].contains(&string(args, key)?) {
-                    return Err(Error(
+                    return Err(Error::new(
                         "role must be user, assistant, system, or summary".into(),
                     ));
                 }
             }
             "derived_from" => {
-                let entries = args[key]
-                    .as_array()
-                    .ok_or_else(|| Error("derived_from must be an array of node IDs".into()))?;
+                let entries = args[key].as_array().ok_or_else(|| {
+                    Error::new("derived_from must be an array of node IDs".into())
+                })?;
                 for entry in entries {
                     validate_id(
                         entry.as_str().ok_or_else(|| {
-                            Error("derived_from must contain only node IDs".into())
+                            Error::new("derived_from must contain only node IDs".into())
                         })?,
                         "n",
                         key,
@@ -125,7 +125,7 @@ pub fn validate_arguments(tool: &str, args: &Value) -> Result<()> {
             }
             "text" | "summary" => {
                 if string(args, key)?.len() > MAX_TEXT_BYTES {
-                    return Err(Error("message text exceeds 1 MiB".into()));
+                    return Err(Error::new("message text exceeds 1 MiB".into()));
                 }
             }
             _ => {
@@ -237,7 +237,7 @@ pub fn dispatch(db: &mut Database, tool: &str, args: &Value) -> Result<Value> {
         "timeline_archive_branch" => {
             json!(db.archive_branch(timeline_id, string(args, "branch")?)?)
         }
-        _ => return Err(Error("unknown timeline tool".into())),
+        _ => return Err(Error::new("unknown timeline tool".into())),
     };
     Ok(result)
 }

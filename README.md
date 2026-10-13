@@ -2,9 +2,9 @@
 
 给 LLM 对话提供持久化分支、可逆摘要和 stdio MCP 接口的 Rust 项目。`tl` 是 JSON CLI，`tl-mcp` 提供 14 个工具；两者共用带文件锁的 JSON 数据库。Core 无文件 I/O、时钟或网络访问。
 
-构建依据是 [TIMELINE-SPEC v1.1.0](TIMELINE-SPEC.md)。规格内部存在预算、占位和归档约束的冲突，推导与实现选择见 [SPEC-NOTES](docs/SPEC-NOTES.md)。
+构建依据是 [TIMELINE-SPEC v1.1.2](TIMELINE-SPEC.md)。归档按 v1.1.1 修订搬运被摘要覆盖的独有原文，预算按 v1.1.2 契约返回结构化不可行错误；历史修正依据与其余边界解释见 [SPEC-NOTES](docs/SPEC-NOTES.md)。
 
-> **当前归档不能减少数据库大小。** 归档三条件与水位完整性共同保证：可搬运节点集合恒为空。`archive-branch` 成功时只删除符合条件的非当前分支指针并写审计，返回 `{"archived":[]}`，原文全部保留。恢复冷存储的命令尚未提供。
+`archive-branch` 将符合条件的分支独有原文从热区 `nodes` 搬到同一 JSON 数据库的 `archive` 区，保留共享节点、摘要及全部原文内容；它减少热区节点数，不承诺缩小数据库文件。只读查询可直接读取归档内容，显式恢复命令预留给 v1.2。
 
 ## 构建与验收
 
@@ -20,7 +20,7 @@ cargo build --release --locked
 
 也可用 `python scripts/acceptance.py` 一键运行检查，日志保存到 `target/acceptance/commands.log` 和 `target/acceptance/results.json`。Python 仅用于验收/治理脚本，运行程序不需要它。测试使用临时数据库。
 
-本次结果：62 个测试通过、0 失败、0 忽略；格式、Clippy 严格检查和 Release 构建通过。[§13 逐项验收记录](docs/ACCEPTANCE.md) 单独标明预算冲突、空搬运归档和未启用的可选优化。
+最新检查结果、测试分组及平台范围见 [§13 逐项验收记录](docs/ACCEPTANCE.md)，其中也声明尚未启用的可选优化。
 
 构建产物为 `target/release/tl`、`target/release/tl-mcp`，Windows 带 `.exe`。将产物加入 PATH，或直接通过 Cargo 运行：
 
@@ -35,7 +35,7 @@ cargo run --bin tl-mcp -- --db demo.timeline.json
 
 数据库路径优先级为 **`--db PATH` > 非空 `TIMELINE_DB` > 用户目录中的 `.timeline.json`**。Windows 用户目录取 `USERPROFILE`，缺失时回退 `HOME`；Unix 取 `HOME`。父目录必须已存在。应用不自动加载 `.env`，详见 [环境说明](docs/environments.md)。
 
-所有 CLI 命令均可附带全局参数 `--db PATH`、`--timeline TL`、`--idempotency-key KEY`。省略 timeline 时选择 ID 数字最小、最早创建的 timeline；create 不需要已有 timeline。成功向 stdout 输出 JSON、退出码为 0；错误向 stderr 输出 `{"error":"原因"}`、退出码非零。`--help`/`--version` 为文本帮助。
+所有 CLI 命令均可附带全局参数 `--db PATH`、`--timeline TL`、`--idempotency-key KEY`。省略 timeline 时选择 ID 数字最小、最早创建的 timeline；create 不需要已有 timeline。成功向 stdout 输出 JSON、退出码为 0；错误向 stderr 输出 `{"error":"原因"}`、退出码非零，预算不可行错误另含 `data`（见下文）。`--help`/`--version` 为文本帮助。
 
 下面是完整命令列表。方括号表示可选参数，不要原样输入；ID 应替换为实际返回值。各命令前都可加 `tl --db PATH --timeline TL`。
 
@@ -54,7 +54,7 @@ cargo run --bin tl-mcp -- --db demo.timeline.json
 | `branches` | `timeline_branches` | `{name,head,current}` 数组 |
 | `node --node n1` | `timeline_node` | 节点详情，role/text/tokens 为顶层字段 |
 | `archive-check --name 分支` | `timeline_archive_check` | `eligible,reasons` |
-| `archive-branch --name 分支` | `timeline_archive_branch` | 当前规则下为 `{"archived":[]}` |
+| `archive-branch --name 分支` | `timeline_archive_branch` | `{"archived":["n2","n3"]}`，仅列本次实际搬运的节点 |
 
 MCP 除 create 外均须显式传 timeline_id；CLI `--max` 对应 `max_tokens`，`--derived-from` 对应字符串数组 `derived_from`，归档 `--name` 对应 `branch`。完整参数 schema 由 tools/list 返回。
 
@@ -79,13 +79,21 @@ tl --db demo.timeline.json branches
 
 **RESERVE = 32**。自动占位节点的 tokens 恒为 32，不依模板重估。相同父节点和区间的占位复用；summaries_created 也包含复用 ID。原文不会因摘要或预算被删除。
 
-选择顺序为目标节点、pin、真实摘要覆盖节点、时间从新到旧。机械占位不进入 Tier 2，以避免重复预算调用改变优先级。原算法若因多个摘要缺口超限，采用计算实际缺口成本的 fallback；强制保留内容与必要摘要缺口已使约束无解时返回 Error，不提交节点或计数器变化。只有 pin 本身超过预算才适用规格的例外。详见 [SPEC-NOTES](docs/SPEC-NOTES.md)。
+选择顺序为目标节点、pin、真实摘要覆盖节点、时间从新到旧。机械占位不进入 Tier 2，以避免重复预算调用改变优先级。参考贪心算法若因多个摘要缺口超限，采用计算实际缺口成本的修复循环；输入可行时保证输出不超过 `max_tokens + RESERVE`。只有 pin 本身超过预算才适用规格的例外。
+
+输入不可行时返回精确错误 `budget infeasible`，`data.required_tokens` 是保留目标、pin 并覆盖全部省略区间的最低布局总 token 数，`data.max_tokens` 是请求预算。失败不提交节点、计数器、审计或幂等结果。规格反例 `[1000, 1(pin), 1000, 0(target)]`、预算 1 的 CLI 错误为 `{"error":"budget infeasible","data":{"required_tokens":65,"max_tokens":1}}`。该契约由 §5.5 明确规定；最低成本计算与回归设计见 [SPEC-NOTES](docs/SPEC-NOTES.md)。
 
 水位表示 root→watermark 路径上的非根节点均被 pin 或摘要覆盖；成功创建摘要/占位后，满足完整覆盖且不回退才推进。若 unpin 会导致水位内出现裸消息，操作报错。
 
 **水位扫描优化尚未启用。** `context_budget_with_watermark(..., true/false)` 均执行相同完整扫描；一致性测试不代表加速路径已实现。
 
 summarize 新增真实摘要，不改写占位或旧摘要；同区间真实摘要解除旧占位的未完成归档依赖。相同区间、文本、tokens、依赖和被替代版本的重复调用复用首次结果。`--supersede` 创建递增版本并指向旧版，旧节点保留；引用旧版的 derived_from 下游级联标记 stale。用 `node --node 旧摘要ID` 可取回旧版，用 `context --node 原区间终点` 可取回原文。
+
+## 归档与冷热读取
+
+归档仍须同时满足水位、整条路径无 pin、无未回填占位依赖三条件，并且不能归档当前分支。成功后删除分支指针，仅搬运路径上仍在热区、分支引用计数为 1、无 pin 的原文节点；摘要覆盖不再阻止搬运，摘要节点始终留在热区。共享前缀、其他分支引用的节点和既有归档节点不重复搬运。`archived` 可以为空，取决于该分支是否有可搬运独有原文。
+
+归档不改写 `parent`、`children` 或消息，因此热摘要的父节点可以位于冷区。`node`、`context` 以及核心的 `tokens`、路径查询统一读取两区，审计中的原文 ID 在重启后仍可追溯。直接从冷节点 `fork` 会报错；可以从保留在热区的摘要 `fork` 并继续追加，其路径中的归档祖先保持可读。显式将冷节点恢复到热区的操作尚未实现。
 
 ## 幂等、存储与派生数据
 
@@ -112,7 +120,7 @@ Unix 新文件为 0600；Windows 创建数据库、备份、锁时使用受保�
 | 版本后继、反向依赖、stale | 根据 supersedes/derived_from 重建并传播 |
 | 水位路径集合 | 根据持久化 watermark 与 parent 重建 |
 
-读取时可丢弃任意损坏类型的 prefix_tokens/stale 并重建；源数据损坏仍报错。format_version 保持 1，缺少 v1.1 新字段的旧文件按规格缺省解释。
+读取时可丢弃任意损坏类型的 prefix_tokens/stale 并重建；源数据损坏仍报错。派生重建和结构验证同时覆盖热区与归档区。format_version 保持 1，缺少 v1.1 新字段的旧文件按规格缺省解释；本次规格修订不改变数据库格式或 MCP 工具集版本。
 
 ## 审计与恢复
 
@@ -154,6 +162,6 @@ Unix 替换为对应绝对路径。也可省略 --db，通过进程环境 TIMELI
 
 支持 ping。初始化报告服务名 timeline、版本 1.1.0；支持协商 2024-11-05、2025-03-26、2025-06-18、2025-11-25，未知版本返回 2025-11-25 供客户端决定是否继续，不承诺未来协议功能。旧两个版本支持 batch 串行处理；2025-06-18 及以后只接受单请求。遵循 [MCP 生命周期](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)、[stdio 传输](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)与[旧版基础协议](https://modelcontextprotocol.io/specification/2025-03-26/basic)。
 
-所有版本的成功结果均在 `result.content[0].text` 中保存工具 JSON 字符串；2025-06-18 及以后的对象结果同时返回 structuredContent。幂等键可在 arguments 或 params 中，两处同时提供须一致。领域错误 code=-32000，协议错误使用对应标准错误码；通知不回应也不执行变更工具。
+所有版本的成功结果均在 `result.content[0].text` 中保存工具 JSON 字符串；2025-06-18 及以后的对象结果同时返回 structuredContent。幂等键可在 arguments 或 params 中，两处同时提供须一致。领域错误 code=-32000，协议错误使用对应标准错误码；通知不回应也不执行变更工具。预算不可行返回 `error` 对象 `{"code":-32000,"message":"budget infeasible","data":{"required_tokens":65,"max_tokens":1}}`（此数值对应上文反例）。
 
 更多信息：[技术事实](TECH.md)、[文档索引](docs/README.md)、[环境说明](docs/environments.md)、[机器可读检查命令](.project-governance.json)。

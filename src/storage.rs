@@ -27,12 +27,12 @@ fn resolve_path(
         None => match environment.filter(|value| !value.is_empty()) {
             Some(path) => PathBuf::from(path),
             None => home
-                .ok_or_else(|| Error("cannot find a home directory; supply --db".into()))?
+                .ok_or_else(|| Error::new("cannot find a home directory; supply --db".into()))?
                 .join(".timeline.json"),
         },
     };
     if path.as_os_str().is_empty() {
-        return Err(Error("database path cannot be empty".into()));
+        return Err(Error::new("database path cannot be empty".into()));
     }
     Ok(path)
 }
@@ -58,13 +58,13 @@ impl Storage {
     /// A stable sidecar is locked: replacing the DB inode must not replace its lock.
     fn lock(&self, exclusive: bool) -> Result<File> {
         let file = private_open(&sidecar(&self.path, ".lock"), false)
-            .map_err(|_| Error("cannot open database lock".into()))?;
+            .map_err(|_| Error::new("cannot open database lock".into()))?;
         if exclusive {
             FileExt::lock_exclusive(&file)
         } else {
             FileExt::lock_shared(&file)
         }
-        .map_err(|_| Error("cannot lock database".into()))?;
+        .map_err(|_| Error::new("cannot lock database".into()))?;
         // Closing this handle releases the lock, including on early return/panic.
         Ok(file)
     }
@@ -80,11 +80,11 @@ impl Storage {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Ok((Database::default(), None));
             }
-            Err(_) => return Err(Error("cannot read database".into())),
+            Err(_) => return Err(Error::new("cannot read database".into())),
         };
         let mut db: Database = serde_json::from_slice(&bytes).map_err(|_| corrupt())?;
         if db.format_version != 1 {
-            return Err(Error(
+            return Err(Error::new(
                 "unsupported database format_version; restore a compatible .bak backup".into(),
             ));
         }
@@ -107,7 +107,7 @@ impl Storage {
         let (mut db, previous) = self.load()?;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| Error("system clock precedes the Unix epoch".into()))?
+            .map_err(|_| Error::new("system clock precedes the Unix epoch".into()))?
             .as_secs();
         // A JSON pair is unambiguous even when keys contain separators or Unicode.
         let encoded_key = idempotency_key.map(|key| json!([timeline_scope, key]).to_string());
@@ -120,14 +120,14 @@ impl Storage {
         }
         let audit_start = db.audit.len();
         let previous_audit = serde_json::to_value(&db.audit)
-            .map_err(|_| Error("cannot serialize audit history".into()))?;
+            .map_err(|_| Error::new("cannot serialize audit history".into()))?;
         let result = op(&mut db)?;
         if db.audit.len() < audit_start
             || serde_json::to_value(&db.audit[..audit_start])
-                .map_err(|_| Error("cannot serialize audit history".into()))?
+                .map_err(|_| Error::new("cannot serialize audit history".into()))?
                 != previous_audit
         {
-            return Err(Error("audit history is append-only".into()));
+            return Err(Error::new("audit history is append-only".into()));
         }
         db.idempotency
             .retain(|_, entry| now.saturating_sub(entry.created_at) < IDEMPOTENCY_TTL_SECONDS);
@@ -158,7 +158,7 @@ impl Storage {
         }
         db.rebuild_and_validate()?;
         let mut bytes = serde_json::to_vec_pretty(&db)
-            .map_err(|_| Error("cannot serialize database".into()))?;
+            .map_err(|_| Error::new("cannot serialize database".into()))?;
         bytes.push(b'\n');
 
         // Both snapshots use fsync + same-directory atomic replacement. Never
@@ -172,7 +172,7 @@ impl Storage {
 }
 
 fn corrupt() -> Error {
-    Error("database is corrupt; restore the .bak backup before retrying".into())
+    Error::new("database is corrupt; restore the .bak backup before retrying".into())
 }
 
 fn sidecar(path: &Path, suffix: &str) -> PathBuf {
@@ -189,20 +189,20 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut temporary = tempfile::Builder::new()
         .prefix(".timeline-")
         .make_in(parent, |path| private_open(path, true))
-        .map_err(|_| Error("cannot create a private database snapshot".into()))?;
+        .map_err(|_| Error::new("cannot create a private database snapshot".into()))?;
     temporary
         .write_all(bytes)
         .and_then(|()| temporary.as_file().sync_all())
-        .map_err(|_| Error("cannot flush database snapshot".into()))?;
+        .map_err(|_| Error::new("cannot flush database snapshot".into()))?;
     temporary
         .persist(path)
-        .map_err(|_| Error("cannot atomically replace database snapshot".into()))?;
+        .map_err(|_| Error::new("cannot atomically replace database snapshot".into()))?;
     // Windows persist uses MoveFileExW(REPLACE_EXISTING); Unix rename additionally
     // needs the containing directory synced for crash durability.
     #[cfg(unix)]
     File::open(parent)
         .and_then(|directory| directory.sync_all())
-        .map_err(|_| Error("cannot flush database directory".into()))?;
+        .map_err(|_| Error::new("cannot flush database directory".into()))?;
     Ok(())
 }
 

@@ -1,4 +1,4 @@
-# Timeline ADT 设计规格书（TIMELINE-SPEC v1.1.0）
+# Timeline ADT 设计规格书（TIMELINE-SPEC v1.1.2）
 
 > 日期：2026-10-13 ｜ 状态：构建依据（authoritative）
 > v1.1.0 修订：在 v1.0.0 的 6 条公理与 14 个操作契约基础上，吸收 6 项来自论文研读的改进
@@ -143,8 +143,11 @@ timeline/
    watermark 只在 `summarize` 成功后自动推进：若 root→to 路径满足不变量 7 的条件，
    且（watermark 为 null，或 watermark 是 to 的祖先），则 watermark 置为 to。
 9. **引用计数语义**：`refcount(n) = 经过 n 的分支 head 数 + 覆盖 n 的摘要数 + (pinned?1:0)`。
-   refcount 归零的节点才允许物理删除；归档操作只搬运"分支独有"节点
-   （分支引用计数为 1 且无 pin、无摘要覆盖）。refcount 为派生数据，启动时重建。
+   refcount 归零的节点才允许物理删除；归档操作只搬运分支独有节点
+   （分支引用计数为 1 且无 pin）。被摘要覆盖的节点允许搬运：
+   其语义已由摘要节点承载（摘要为独立节点，不随归档移动），
+   且原文节点永不删除（§5.3 保证 3），归档仅为冷热物理位置搬运，仍可恢复。
+   refcount 为派生数据，启动时重建。
 10. **摘要版本链**：`supersedes` 形成单链；旧版本永保留（可逆）；`stale` 为派生标记，
     由 `derived_from` 关系重算得出，不得持久化脏值（见 §6.3）。
 
@@ -187,13 +190,15 @@ MCP 层另有 `idempotency_key` 服务端去重（见 §7.1）。
 | # | 操作 | 签名 | 前置 / 后置 / 复杂度 |
 |---|------|------|----------------------|
 | 15 | archive_check | `archive_check(branch) → {eligible: bool, reasons: string[]}` | 纯查询。按**归档三条件**逐项判定分支是否可归档：① **水位条件**：`watermark ≠ null`，且 head 为 watermark 本身或其祖先（分支内容已全部越过水位线）；② **无 pin**：root→head 路径上无 `pinned` 节点；③ **无未回填的摘要依赖**：不存在仍为 PLACEHOLDER 模板的摘要节点，其 `summary_range` 与该路径相交。`reasons` 列出不满足的条件。O(路径长 + 摘要数) |
-| 16 | archive_branch | `archive_branch(branch) → {archived: string[]}` | 前置：`archive_check(branch).eligible` 必须为 true，否则错；不能归档当前分支。语义：将该分支**独有**节点（分支引用计数为 1、且无 pin、无摘要覆盖）移入 `archive` 区；共享前缀节点与其他分支共享的节点不动；分支指针删除。归档节点仍可恢复（恢复操作预留给 v1.2）。每次归档写入审计日志。O(路径长) |
+| 16 | archive_branch | `archive_branch(branch) → {archived: string[]}` | 前置：`archive_check(branch).eligible` 必须为 true，否则错；不能归档当前分支。语义：将该分支**独有**节点（经过该节点的分支 head 数 == 1、且无 pin）移入 `archive` 区；被摘要覆盖的独有节点允许搬运（其语义已由摘要节点承载，摘要为独立节点不随归档移动）；共享前缀节点与其他分支共享的节点不动；分支指针删除。归档节点仍可恢复（恢复操作预留给 v1.2）。每次归档写入审计日志。后置：`archive_check` 三条件保持不变；独有 pin 节点保留在热区（pin 语义优先）。O(路径长) |
 
 ---
 
 ## 5. `context_budget` 精确算法
 
-这是本 ADT 最微妙的部分，实现必须逐行遵循。
+这是本 ADT 最微妙的部分。实现必须满足 §5.3 的保证；§5.2 伪码为常规路径的参考实现，
+保证优先于伪码字面步骤。（原"实现必须逐行遵循"在此条下无法与保证同时成立，
+特此澄清，见 §5.5。）
 
 ### 5.1 常量
 
@@ -284,6 +289,23 @@ watermark 之前的区间不再创建新占位，直接采用已存在的摘要�
 > 与参考实现的差异（以本规格为准）：参考实现在 pin 循环中可能对已保留的目标节点
 > 重复计 tokens（偏保守）；本规格要求 `not kept` 检查。参考实现每次调用都新建占位；
 > 本规格要求复用规则。
+
+### 5.5 预算不可行（v1.1.2 新增）
+
+定义输入 `(path, max_tokens)` 为**预算可行**，当且仅当存在满足 §5.3 保证 1–3 的
+kept 选择。`context_budget` 的契约修订为：
+
+1. **输入可行时**：必须返回满足 §5.3 全部保证的结果。§5.2 伪码为常规路径参考实现；
+   允许等价的修复循环（合并丢弃区间、复用占位等），只要保证成立。
+2. **输入不可行时**（如强制保留部分 Tier 0+Tier 1 已超上界，或任何合法 kept 选择
+   都迫使输出超界）：必须返回显式错误 `budget infeasible`，
+   错误载荷含 `{required_tokens, max_tokens}`，**不得返回超预算的静默结果**。
+
+反例（字面伪码违反自身保证的输入，§9 测试必须断言）：
+链 tokens `[root=0, 1000, 1(pin), 1000, target=0]`、`max_tokens=1` 时，
+字面贪心产生两个丢弃区间（被 pin 节点隔开），各占位 32，
+输出 `32+1+32=65 > max+32=33`，违反 §5.3 保证 1。
+此输入为预算不可行，必须返回 `budget infeasible` 错误。
 
 ---
 
@@ -453,7 +475,7 @@ tl archive-branch --name 旧分支
 | A2 零拷贝 fork | `axiom_fork_zero_copy` | Given 链 root→n2；When `fork(n1,"b")`；Then 新分支 head==n1 且**节点总数不变**；再在 b 上 append，Then main 的 context 不变 |
 | A3 路径即上下文 | `axiom_path_is_context` | Given 链 + 分支；When `context(n)`；Then 返回恰为 root→n 路径消息序列（旧→新，跳过根） |
 | A4 分支隔离 | `axiom_branch_isolation` | Given fork 出 b；When 在 b 上 append 三条；Then main 的 head/context/tokens 全不变 |
-| A5 预算保证 | `axiom_budget_bound` | Given 10 节点链（每节 50t）；When `context_budget(n10, 150)`；Then `total_tokens ≤ 150+RESERVE` 且含 n10 的消息；**property**：随机链长/随机 tokens/随机预算 fuzz 1000 次，上界恒成立 |
+| A5 预算保证 | `axiom_budget_bound` | Given 10 节点链（每节 50t）；When `context_budget(n10, 150)`；Then `total_tokens ≤ 150+RESERVE` 且含 n10 的消息；**property**：随机链长/随机 tokens/随机预算 fuzz 1000 次，上界恒成立；**不可行输入**：链 tokens `[root=0, 1000, 1(pin), 1000, target=0]`、`max_tokens=1` 时，Then 返回 `budget infeasible` 错误（载荷含 `required_tokens`/`max_tokens`），不得返回超预算结果 |
 | A5 pin 优先 | `axiom_pin_beats_budget` | Given 同上；When `pin(n2)` 后 `context_budget(n10, 150)`；Then n2 的消息必在输出中（即使 total 超预算——pin 优先） |
 | A6 可逆遗忘 | `axiom_summarize_reversible` | Given 链；When `summarize(n2,n5,"…")`；Then n2..n5 仍可 `context` 取回原文；摘要节点 `summary_range={n2,n5}` 且为 parent(n2) 的子节点 |
 | A6 占位复用 | `axiom_placeholder_dedup` | When 对同一区间调两次 `context_budget`；Then 第二次不新增占位节点（`summaries_created` 返回同一 id） |
@@ -515,7 +537,7 @@ tl archive-branch --name 旧分支
 ## 13. 交付验收清单（给验收方逐项打勾）
 
 - [ ] 单元测试全过：§9 的 15 个测试（含 fuzz property test）无失败
-- [ ] 不变量检查：随机操作序列后断言 §3.4 的 6 条不变量（含 prefix_tokens 一致性）
+- [ ] 不变量检查：随机操作序列后断言 §3.4 的 10 条不变量（含 prefix_tokens 一致性）
 - [ ] CLI 全命令冒烟通过（§9 脚本），JSON 输出形状与 §7.2 一致
 - [ ] MCP 全流程通过：initialize → tools/list（14 个）→ tools/call 全工具 → 错误用例返回 JSON-RPC error
 - [ ] 预算上界：fuzz 1000 次随机场景，`total ≤ max_tokens + RESERVE` 恒成立（pin 超预算的用例除外，见 A5）
@@ -529,6 +551,18 @@ tl archive-branch --name 旧分支
 - [ ] `tl-mcp --db` 与 `TIMELINE_DB` 覆盖规则实测正确
 
 ## 14. 版本与变更
+
+- TIMELINE-SPEC v1.1.2（2026-10-13）：澄清预算契约（Codex 实现 review 阻塞项 2，
+  Corentin 确认）——新增 §5.5「预算不可行」：保证优先于伪码字面步骤；
+  不可行输入必须返回 `budget infeasible` 错误（载荷 `{required_tokens, max_tokens}`），
+  不得返回超预算的静默结果；§9 `axiom_budget_bound` 追加不可行输入断言。
+  DB 格式与 MCP 工具集无变化（`format_version=1`，工具集版本 1.1.0）。
+
+- TIMELINE-SPEC v1.1.1（2026-10-13）：修订归档语义（Codex 实现 review 阻塞项 1，
+  Corentin 裁决选项 a）——op 16 放宽搬运条件，允许搬运被摘要覆盖的分支独有节点
+  （分支引用计数为 1 且无 pin；`archive_check` 三条件不变）；§3.4 不变量 9 同步修订；
+  修正 §13"6 条不变量"笔误为 10 条。DB 格式与 MCP 工具集无变化
+ （`format_version=1`，工具集版本 1.1.0）。
 
 - TIMELINE-SPEC v1.1.0（2026-10-13）：吸收论文研读的 6 项改进——
   ① 上下文水位线（§3.3/§3.4 不变量 7/8，§5.4）；

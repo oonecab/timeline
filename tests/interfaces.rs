@@ -27,14 +27,19 @@ fn cli(db: &Path, args: &[&str]) -> Value {
     serde_json::from_slice(&output.stdout).expect("stdout is exactly one JSON value")
 }
 
-fn cli_error(db: &Path, args: &[&str]) -> String {
+fn cli_error_value(db: &Path, args: &[&str]) -> Value {
     let output = cli_output(db, args);
     assert!(
         !output.status.success(),
         "tl {args:?} unexpectedly succeeded"
     );
     assert!(output.stdout.is_empty(), "errors must not print stdout");
-    let result: Value = serde_json::from_slice(&output.stderr).expect("stderr is JSON");
+    serde_json::from_slice(&output.stderr).expect("stderr is JSON")
+}
+
+fn cli_error(db: &Path, args: &[&str]) -> String {
+    let result = cli_error_value(db, args);
+    assert_eq!(result.as_object().unwrap().len(), 1);
     result["error"].as_str().expect("error reason").to_owned()
 }
 
@@ -501,6 +506,7 @@ fn interfaces_reject_invalid_inputs_as_json() {
         arguments["timeline_id"] = json!("tl0");
         let response = mcp.request("tools/call", json!({"name":name,"arguments":arguments}));
         assert_eq!(response["error"]["code"], -32000, "{response}");
+        assert!(response["error"].get("data").is_none());
     }
     assert_eq!(
         mcp.request(
@@ -596,6 +602,235 @@ fn cli_and_mcp_idempotency_survive_process_restart() {
         4,
         "root + two messages + one summary only"
     );
+}
+
+#[test]
+fn cli_budget_infeasible_payload_and_atomic_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    for (name, costs, pin, required) in [
+        ("separated-gaps", vec![1000, 1, 1000, 0], Some(1), 65),
+        ("oversized-target", vec![100], None, 100),
+    ] {
+        let db = temp.path().join(format!("{name}.json"));
+        cli(&db, &["create"]);
+        let mut nodes = Vec::new();
+        for tokens in &costs {
+            let node = cli(
+                &db,
+                &[
+                    "append",
+                    "--role",
+                    "user",
+                    "--text",
+                    "original text",
+                    "--tokens",
+                    &tokens.to_string(),
+                ],
+            )["node"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            nodes.push(node);
+        }
+        if let Some(index) = pin {
+            cli(&db, &["pin", "--node", &nodes[index]]);
+        }
+        let target = nodes.last().unwrap();
+        let before = std::fs::read(&db).unwrap();
+        let backup = db.with_extension("json.bak");
+        let before_backup = std::fs::read(&backup).unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                cli_error_value(
+                    &db,
+                    &[
+                        "--idempotency-key",
+                        "budget-retry",
+                        "budget",
+                        "--node",
+                        target,
+                        "--max",
+                        "1",
+                    ]
+                ),
+                json!({"error":"budget infeasible","data":{"required_tokens":required,"max_tokens":1}})
+            );
+            assert_eq!(std::fs::read(&db).unwrap(), before);
+            assert_eq!(std::fs::read(&backup).unwrap(), before_backup);
+        }
+        let recovered = cli(
+            &db,
+            &[
+                "--idempotency-key",
+                "budget-retry",
+                "budget",
+                "--node",
+                target,
+                "--max",
+                "4096",
+            ],
+        );
+        assert_eq!(recovered["messages"].as_array().unwrap().len(), costs.len());
+        assert_eq!(recovered["total_tokens"], costs.iter().sum::<u64>());
+    }
+}
+
+#[test]
+fn mcp_budget_infeasible_payload_and_atomic_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    for (name, costs, pin, required) in [
+        ("separated-gaps", vec![1000, 1, 1000, 0], Some(1), 65),
+        ("oversized-target", vec![100], None, 100),
+    ] {
+        let db = temp.path().join(format!("{name}.json"));
+        let mut mcp = Mcp::new(&db);
+        mcp.call("timeline_create", json!({}));
+        let mut nodes = Vec::new();
+        for tokens in &costs {
+            nodes.push(
+                mcp.call(
+                    "timeline_append",
+                    json!({"timeline_id":"tl0","role":"user","text":"original text","tokens":tokens}),
+                )["node"]
+                    .clone(),
+            );
+        }
+        if let Some(index) = pin {
+            mcp.call(
+                "timeline_pin",
+                json!({"timeline_id":"tl0","node":nodes[index]}),
+            );
+        }
+        let target = nodes.last().unwrap();
+        let before = std::fs::read(&db).unwrap();
+        let backup = db.with_extension("json.bak");
+        let before_backup = std::fs::read(&backup).unwrap();
+        for _ in 0..2 {
+            let response = mcp.request(
+                "tools/call",
+                json!({"name":"timeline_context_budget","idempotency_key":"budget-retry","arguments":{"timeline_id":"tl0","node":target,"max_tokens":1}}),
+            );
+            assert_eq!(
+                response,
+                json!({"jsonrpc":"2.0","id":mcp.next_id,"error":{"code":-32000,"message":"budget infeasible","data":{"required_tokens":required,"max_tokens":1}}})
+            );
+            assert_eq!(std::fs::read(&db).unwrap(), before);
+            assert_eq!(std::fs::read(&backup).unwrap(), before_backup);
+        }
+        drop(mcp);
+        let mut restarted = Mcp::new(&db);
+        let recovered = restarted.call(
+            "timeline_context_budget",
+            json!({"timeline_id":"tl0","node":target,"max_tokens":4096,"idempotency_key":"budget-retry"}),
+        );
+        assert_eq!(recovered["messages"].as_array().unwrap().len(), costs.len());
+        assert_eq!(recovered["total_tokens"], costs.iter().sum::<u64>());
+    }
+}
+
+#[test]
+fn cli_and_mcp_archive_exclusive_covered_nodes_and_read_cold_history() {
+    let temp = tempfile::tempdir().unwrap();
+    for transport in ["cli", "mcp"] {
+        let db = temp.path().join(format!("archive-{transport}.json"));
+        cli(&db, &["create"]);
+        let mut nodes = Vec::new();
+        for text in ["shared", "exclusive one", "exclusive two"] {
+            nodes.push(
+                cli(
+                    &db,
+                    &["append", "--role", "user", "--text", text, "--tokens", "10"],
+                )["node"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+            );
+        }
+        let [a, b, c] = nodes.as_slice() else {
+            unreachable!()
+        };
+        let summary = cli(
+            &db,
+            &[
+                "summarize",
+                "--from",
+                a,
+                "--to",
+                c,
+                "--summary",
+                "covered original text",
+                "--tokens",
+                "5",
+            ],
+        )["node"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        cli(&db, &["fork", "--node", a, "--name", "active"]);
+        cli(&db, &["switch", "--name", "active"]);
+        let context = cli(&db, &["context", "--node", c]);
+        let eligible = json!({"eligible":true,"reasons":[]});
+        let result = if transport == "cli" {
+            assert_eq!(cli(&db, &["archive-check", "--name", "main"]), eligible);
+            cli(&db, &["archive-branch", "--name", "main"])
+        } else {
+            let mut mcp = Mcp::new(&db);
+            assert_eq!(
+                mcp.call(
+                    "timeline_archive_check",
+                    json!({"timeline_id":"tl0","branch":"main"})
+                ),
+                eligible
+            );
+            mcp.call(
+                "timeline_archive_branch",
+                json!({"timeline_id":"tl0","branch":"main"}),
+            )
+        };
+        assert_eq!(result, json!({"archived":[b,c]}));
+        let stored: Value = serde_json::from_slice(&std::fs::read(&db).unwrap()).unwrap();
+        assert_eq!(stored["format_version"], 1);
+        let timeline = &stored["timelines"]["tl0"];
+        assert_eq!(timeline["branches"], json!({"active":a}));
+        assert_eq!(timeline["watermark"], *c);
+        assert!(timeline["nodes"].get(a).is_some());
+        assert!(timeline["nodes"].get(&summary).is_some());
+        assert_eq!(timeline["archive"].as_object().unwrap().len(), 2);
+        for node in [b, c] {
+            assert!(timeline["nodes"].get(node).is_none());
+            assert!(timeline["archive"].get(node).is_some());
+        }
+        assert_eq!(
+            stored["audit"].as_array().unwrap().last().unwrap()["details"],
+            json!({"branch":"main","archived":[b,c]})
+        );
+        assert_eq!(cli(&db, &["context", "--node", c]), context);
+        assert_eq!(cli(&db, &["node", "--node", b])["text"], "exclusive one");
+        let mut restarted = Mcp::new(&db);
+        assert_eq!(
+            restarted.call("timeline_context", json!({"timeline_id":"tl0","node":c})),
+            context
+        );
+        assert_eq!(
+            restarted.call("timeline_node", json!({"timeline_id":"tl0","node":c}))["text"],
+            "exclusive two"
+        );
+        let before_rejected_fork = std::fs::read(&db).unwrap();
+        let rejected = restarted.request("tools/call", json!({"name":"timeline_fork","arguments":{"timeline_id":"tl0","node":c,"name":"restore"}}));
+        assert_eq!(rejected["error"]["code"], -32000);
+        assert_eq!(std::fs::read(&db).unwrap(), before_rejected_fork);
+        let appended = restarted.call(
+            "timeline_append",
+            json!({"timeline_id":"tl0","role":"assistant","text":"new hot history","tokens":3}),
+        );
+        let new_context = restarted.call(
+            "timeline_context",
+            json!({"timeline_id":"tl0","node":appended["node"]}),
+        );
+        assert_eq!(new_context.as_array().unwrap().len(), 2);
+        assert_eq!(new_context[0]["text"], "shared");
+        assert_eq!(new_context[1]["text"], "new hot history");
+    }
 }
 
 #[test]

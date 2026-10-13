@@ -159,8 +159,8 @@ fn real_summary_preserves_placeholder_and_clears_archive_dependency() {
     let check = db.timeline(&tl).unwrap().archive_check("old").unwrap();
     assert!(check.eligible, "{:?}", check.reasons);
     let moved = db.archive_branch(&tl, "old").unwrap();
-    // Under the literal archive predicates every eligible node is covered by
-    // a summary, and covered nodes cannot be moved (§3.4.7/9 and §4.1).
+    // This entire path is shared with main, so even the v1.1.1 relaxed
+    // archive rule must leave the shared original nodes hot.
     assert!(moved.archived.is_empty());
     for id in &ids {
         assert!(db.timeline(&tl).unwrap().nodes.contains_key(id));
@@ -329,7 +329,7 @@ fn cyclic_or_nonmonotonic_source_metadata_is_rejected() {
 }
 
 #[test]
-fn archived_source_cannot_be_an_active_contexts_ancestor() {
+fn archived_ancestor_is_readable_but_cannot_be_an_active_branch_head() {
     let (db, tl, ids) = chain(&[1, 1]);
     let mut malformed = serde_json::to_value(&db).unwrap();
     let ancestor = malformed["timelines"][&tl]["nodes"]
@@ -338,6 +338,16 @@ fn archived_source_cannot_be_an_active_contexts_ancestor() {
         .remove(&ids[0])
         .unwrap();
     malformed["timelines"][&tl]["archive"][&ids[0]] = ancestor;
+    let mut rebuilt: Database = serde_json::from_value(malformed.clone()).unwrap();
+    rebuilt.rebuild_and_validate().unwrap();
+    assert_eq!(
+        rebuilt.timeline(&tl).unwrap().context(&ids[1]).unwrap(),
+        db.timeline(&tl).unwrap().context(&ids[1]).unwrap()
+    );
+    assert_eq!(rebuilt.timeline(&tl).unwrap().tokens(&ids[1]).unwrap(), 2);
+    rebuilt.timeline(&tl).unwrap().validate().unwrap();
+
+    malformed["timelines"][&tl]["branches"]["main"] = json!(ids[0]);
     let mut rebuilt: Database = serde_json::from_value(malformed).unwrap();
     assert!(rebuilt.rebuild_and_validate().is_err());
 }
@@ -389,9 +399,9 @@ fn archived_summary_caches_and_active_downstream_staleness_are_rebuilt() {
         .unwrap();
     db.summarize(&tl, &ids[0], &ids[0], "A revised", Some(1), vec![], Some(a))
         .unwrap();
-    // Fixture for a saved archive: archive_branch's v1.1 three predicates make
-    // nonempty movement unreachable, but the format explicitly retains archive
-    // source metadata and must safely load and reconstruct it.
+    // A saved archive may contain summary nodes from earlier producers. The
+    // format must still validate and rebuild them even though archive_branch
+    // itself preserves independent summary nodes in the hot area.
     let timeline = db.timeline_mut(&tl).unwrap();
     let archived = timeline.nodes.remove(&b).unwrap();
     timeline.archive.insert(b.clone(), archived);

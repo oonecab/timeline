@@ -129,6 +129,17 @@ fn axiom_budget_bound() {
             result.messages.iter().map(|m| m.tokens).sum::<u64>()
         );
     }
+    // v1.1.2 §5.5/§9: mandatory gaps cannot fit in max_tokens + RESERVE.
+    let (mut db, tl, ids) = chain(&[1000, 1, 1000, 0]);
+    db.timeline_mut(&tl).unwrap().pin(&ids[1]).unwrap();
+    let before = serde_json::to_value(&db).unwrap();
+    let error = db.context_budget(&tl, &ids[3], 1).unwrap_err();
+    assert_eq!(error.message, "budget infeasible");
+    assert_eq!(
+        error.data,
+        Some(json!({"required_tokens":65,"max_tokens":1}))
+    );
+    assert_eq!(serde_json::to_value(&db).unwrap(), before);
 }
 #[test]
 fn axiom_pin_beats_budget() {
@@ -277,6 +288,32 @@ fn axiom_archive_three_conditions() {
     assert_eq!(db.timeline(&tl).unwrap().nodes, before);
     assert!(!db.timeline(&tl).unwrap().branches.contains_key("old"));
     assert_eq!(db.audit.last().unwrap().op, "archive_branch");
+
+    // v1.1.1: summary coverage no longer prevents exclusive source movement.
+    let (mut db, tl, ids) = chain(&[10, 20, 30]);
+    db.timeline_mut(&tl).unwrap().fork(&ids[0], "live").unwrap();
+    db.timeline_mut(&tl).unwrap().switch("live").unwrap();
+    let summary = db
+        .summarize(
+            &tl,
+            &ids[0],
+            &ids[2],
+            "all original messages",
+            Some(3),
+            vec![],
+            None,
+        )
+        .unwrap();
+    let original = db.timeline(&tl).unwrap().context(&ids[2]).unwrap();
+    let moved = db.archive_branch(&tl, "main").unwrap();
+    assert_eq!(moved.archived, ids[1..]);
+    let t = db.timeline(&tl).unwrap();
+    assert!(t.nodes.contains_key(&ids[0]));
+    assert!(t.nodes.contains_key(&summary));
+    assert_eq!(t.archive.len(), 2);
+    assert_eq!(t.context(&ids[2]).unwrap(), original);
+    assert_eq!(t.watermark.as_ref(), Some(&ids[2]));
+    t.validate().unwrap();
 }
 #[test]
 fn axiom_idempotency_key() {

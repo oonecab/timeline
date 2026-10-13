@@ -144,7 +144,7 @@ fn run(cli: Cli) -> Result<Value> {
                         .unwrap_or(u64::MAX)
                 })
                 .cloned()
-                .ok_or_else(|| Error("no timeline exists; run tl create first".into()))?,
+                .ok_or_else(|| Error::new("no timeline exists; run tl create first".into()))?,
         };
         args["timeline_id"] = json!(id);
     }
@@ -172,7 +172,11 @@ fn main() {
     match run(cli) {
         Ok(value) => println!("{value}"),
         Err(error) => {
-            eprintln!("{}", json!({"error":error.to_string()}));
+            let mut response = json!({"error":error.to_string()});
+            if let Some(data) = error.data {
+                response["data"] = data;
+            }
+            eprintln!("{response}");
             std::process::exit(1);
         }
     }

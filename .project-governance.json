@@ -29,7 +29,7 @@
       "单 JSON 文件 format_version=1；稳定 sidecar 文件锁串行化事务；临时快照 fsync 后原子替换并保留 .bak。",
       "MCP 提供 14 个工具，按行处理 stdio JSON-RPC；应用运行期间不访问网络、不监听端口。",
       "源数据持久化，派生字段和索引读取时重建；每次成功变更全量 checkpoint，未启用可选增量日志或水位扫描优化。",
-      "规范冲突与实现选择记录于 docs/SPEC-NOTES.md；当前归档规则保留全部节点，只移除符合条件的非当前分支指针。"
+      "构建依据为 TIMELINE-SPEC v1.1.2；归档将独有原文搬入同文件冷区，摘要保留在热区，原文及 parent/children 不变；只读查询跨冷热区。预算不可行返回 budget infeasible 与 required_tokens/max_tokens；历史修正与边界解释见 docs/SPEC-NOTES.md。"
     ]
   },
   "commands": {

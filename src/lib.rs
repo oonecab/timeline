@@ -12,16 +12,35 @@ pub const MAX_TEXT_BYTES: usize = 1024 * 1024;
 pub const MAX_MESSAGES: usize = 100_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Error(pub String);
+pub struct Error {
+    pub message: String,
+    pub data: Option<Value>,
+}
+impl Error {
+    pub fn new(message: String) -> Self {
+        Self {
+            message,
+            data: None,
+        }
+    }
+    pub fn budget_infeasible(required_tokens: u64, max_tokens: u64) -> Self {
+        Self {
+            message: "budget infeasible".into(),
+            data: Some(
+                serde_json::json!({"required_tokens": required_tokens, "max_tokens": max_tokens}),
+            ),
+        }
+    }
+}
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        self.message.fmt(f)
     }
 }
 impl std::error::Error for Error {}
 pub type Result<T> = std::result::Result<T, Error>;
 fn err<T>(message: &str) -> Result<T> {
-    Err(Error(message.into()))
+    Err(Error::new(message.into()))
 }
 fn one() -> u64 {
     1
@@ -235,15 +254,26 @@ impl Timeline {
     }
     pub fn node(&self, id: &str) -> Result<&TLNode> {
         validate_node_id(id)?;
+        self.any_node(id)
+    }
+    fn hot_node(&self, id: &str) -> Result<&TLNode> {
+        self.node(id)?;
+        self.nodes.get(id).ok_or_else(|| {
+            Error::new("node is archived; a branch head must remain in the hot store".into())
+        })
+    }
+    fn node_mut(&mut self, id: &str) -> Result<&mut TLNode> {
+        validate_node_id(id)?;
         self.nodes
-            .get(id)
-            .ok_or_else(|| Error("node does not exist".into()))
+            .get_mut(id)
+            .or_else(|| self.archive.get_mut(id))
+            .ok_or_else(|| Error::new("node does not exist".into()))
     }
     fn any_node(&self, id: &str) -> Result<&TLNode> {
         self.nodes
             .get(id)
             .or_else(|| self.archive.get(id))
-            .ok_or_else(|| Error("node does not exist".into()))
+            .ok_or_else(|| Error::new("node does not exist".into()))
     }
     pub fn tokens(&self, id: &str) -> Result<u64> {
         Ok(self.node(id)?.prefix_tokens)
@@ -293,12 +323,12 @@ impl Timeline {
         }
         Ok(path
             .iter()
-            .filter_map(|id| self.nodes[id].message.clone())
+            .filter_map(|id| self.any_node(id).expect("validated path").message.clone())
             .collect())
     }
     pub fn fork(&mut self, node: &str, name: &str) -> Result<()> {
         validate_branch(name)?;
-        self.node(node)?;
+        self.hot_node(node)?;
         if self.branches.contains_key(name) {
             return err("branch name already exists");
         }
@@ -322,19 +352,18 @@ impl Timeline {
         Ok(())
     }
     pub fn pin(&mut self, id: &str) -> Result<()> {
-        self.node(id)?;
-        self.nodes.get_mut(id).unwrap().pinned = true;
+        self.node_mut(id)?.pinned = true;
         Ok(())
     }
     pub fn unpin(&mut self, id: &str) -> Result<()> {
         self.node(id)?;
         if self.watermark_path.contains(id)
-            && self.nodes[id].message.is_some()
+            && self.node(id)?.message.is_some()
             && self.covers.get(id).copied().unwrap_or(0) == 0
         {
             return err("cannot unpin: watermark would contain uncovered history");
         }
-        self.nodes.get_mut(id).unwrap().pinned = false;
+        self.node_mut(id)?.pinned = false;
         Ok(())
     }
     pub fn branches(&self) -> Vec<BranchInfo> {
@@ -364,14 +393,17 @@ impl Timeline {
         let head = self
             .branches
             .get(branch)
-            .ok_or_else(|| Error("branch does not exist".into()))?;
+            .ok_or_else(|| Error::new("branch does not exist".into()))?;
         let path = self.path(head)?;
         let set: HashSet<_> = path.iter().collect();
         let mut reasons = Vec::new();
         if !self.watermark_path.contains(head) {
             reasons.push("watermark: branch head has not passed the watermark".into());
         }
-        if path.iter().any(|id| self.nodes[id].pinned) {
+        if path
+            .iter()
+            .any(|id| self.any_node(id).expect("validated path").pinned)
+        {
             reasons.push("pin: branch path contains pinned nodes".into());
         }
         if self.nodes.values().chain(self.archive.values()).any(|n| {
@@ -393,7 +425,8 @@ impl Timeline {
         let path = self.path(to)?;
         if self.watermark.as_ref().is_none_or(|w| path.contains(w))
             && path.iter().all(|id| {
-                self.nodes[id].message.is_none() || self.nodes[id].pinned || self.covers(id) > 0
+                let node = self.any_node(id).expect("validated path");
+                node.message.is_none() || node.pinned || self.covers(id) > 0
             })
         {
             self.watermark = Some(to.into());
@@ -403,9 +436,8 @@ impl Timeline {
     }
     fn insert_node(&mut self, node: TLNode) {
         if let Some(parent) = &node.parent {
-            self.nodes
-                .get_mut(parent)
-                .unwrap()
+            self.node_mut(parent)
+                .expect("validated parent")
                 .children
                 .push(node.id.clone());
         }
@@ -476,22 +508,22 @@ impl Database {
     pub fn timeline(&self, id: &str) -> Result<&Timeline> {
         self.timelines
             .get(id)
-            .ok_or_else(|| Error("timeline does not exist".into()))
+            .ok_or_else(|| Error::new("timeline does not exist".into()))
     }
     pub fn timeline_mut(&mut self, id: &str) -> Result<&mut Timeline> {
         self.timelines
             .get_mut(id)
-            .ok_or_else(|| Error("timeline does not exist".into()))
+            .ok_or_else(|| Error::new("timeline does not exist".into()))
     }
     pub fn create(&mut self) -> Result<String> {
         let next_tl = self
             .next_timeline
             .checked_add(1)
-            .ok_or_else(|| Error("timeline id counter exhausted".into()))?;
+            .ok_or_else(|| Error::new("timeline id counter exhausted".into()))?;
         let next_n = self
             .next_node
             .checked_add(1)
-            .ok_or_else(|| Error("node id counter exhausted".into()))?;
+            .ok_or_else(|| Error::new("node id counter exhausted".into()))?;
         let id = format!("tl{}", self.next_timeline);
         let root = format!("n{}", self.next_node);
         self.timelines
@@ -514,11 +546,11 @@ impl Database {
             .node(&head)?
             .prefix_tokens
             .checked_add(msg.tokens)
-            .ok_or_else(|| Error("token count overflow".into()))?;
+            .ok_or_else(|| Error::new("token count overflow".into()))?;
         let next = self
             .next_node
             .checked_add(1)
-            .ok_or_else(|| Error("node id counter exhausted".into()))?;
+            .ok_or_else(|| Error::new("node id counter exhausted".into()))?;
         let id = format!("n{}", self.next_node);
         let node = TLNode {
             id: id.clone(),
@@ -576,7 +608,7 @@ impl Database {
             .node(from)?
             .parent
             .clone()
-            .ok_or_else(|| Error("cannot summarize the root node".into()))?;
+            .ok_or_else(|| Error::new("cannot summarize the root node".into()))?;
         let key = summary_key(&range, &msg, &derived_from, supersede.as_deref());
         if let Some(existing) = t.summary_keys.get(&key) {
             return Ok(existing.clone());
@@ -596,7 +628,7 @@ impl Database {
             }
             old.summary_version
                 .checked_add(1)
-                .ok_or_else(|| Error("summary version overflow".into()))?
+                .ok_or_else(|| Error::new("summary version overflow".into()))?
         } else {
             1
         };
@@ -604,11 +636,11 @@ impl Database {
             .node(&parent)?
             .prefix_tokens
             .checked_add(msg.tokens)
-            .ok_or_else(|| Error("token count overflow".into()))?;
+            .ok_or_else(|| Error::new("token count overflow".into()))?;
         let next = self
             .next_node
             .checked_add(1)
-            .ok_or_else(|| Error("node id counter exhausted".into()))?;
+            .ok_or_else(|| Error::new("node id counter exhausted".into()))?;
         let id = format!("n{}", self.next_node);
         let node = TLNode {
             id: id.clone(),
@@ -629,10 +661,9 @@ impl Database {
         if t.nodes[&id].supersedes.is_some() {
             t.refresh_stale();
         } else {
-            let stale = t.nodes[&id]
-                .derived_from
-                .iter()
-                .any(|d| t.successors.contains_key(d) || t.nodes[d].stale);
+            let stale = t.nodes[&id].derived_from.iter().any(|d| {
+                t.successors.contains_key(d) || t.any_node(d).expect("validated dependency").stale
+            });
             t.nodes.get_mut(&id).unwrap().stale = stale;
         }
         // Budget batches advance once after creating all their placeholders.
@@ -663,7 +694,7 @@ impl Database {
         }
         let check = t.archive_check(branch)?;
         if !check.eligible {
-            return Err(Error(check.reasons.join("; ")));
+            return Err(Error::new(check.reasons.join("; ")));
         }
         let path = t.path(&t.branches[branch])?;
         let mut shared = HashSet::new();
@@ -674,7 +705,16 @@ impl Database {
         }
         let archived: Vec<_> = path
             .into_iter()
-            .filter(|id| !shared.contains(id) && !t.nodes[id].pinned && t.covers(id) == 0)
+            .filter(|id| {
+                // A summary is independent evidence and remains hot even when
+                // its immutable parent or covered source interval becomes cold.
+                !shared.contains(id)
+                    && t.nodes.get(id).is_some_and(|node| {
+                        !node.pinned
+                            && node.summary_range.is_none()
+                            && node.message.as_ref().is_some_and(|m| m.role != "summary")
+                    })
+            })
             .collect();
         let t = self.timeline_mut(tl)?;
         for id in &archived {
@@ -718,7 +758,7 @@ impl Database {
         let n = path.len();
         let costs: Vec<u128> = path
             .iter()
-            .map(|id| u128::from(t.nodes[id].cost()))
+            .map(|id| u128::from(t.any_node(id).expect("validated path").cost()))
             .collect();
         let mut kept = vec![false; n];
         kept[0] = true;
@@ -727,7 +767,7 @@ impl Database {
         let mut spent = costs[n - 1];
         let mut pin_total = 0u128;
         for (i, id) in path.iter().enumerate() {
-            if t.nodes[id].pinned {
+            if t.any_node(id)?.pinned {
                 pin_total += costs[i];
                 mandatory[i] = true;
                 if !kept[i] {
@@ -800,9 +840,11 @@ impl Database {
             }
             let mut total = output_cost(&kept);
             if total > bound {
-                return err(
-                    "budget infeasible: target, pins and required summary gaps exceed max_tokens + RESERVE",
-                );
+                // This minimum cannot exceed the full original path's u64
+                // prefix sum, because every gap costs min(raw, RESERVE).
+                let required_tokens =
+                    u64::try_from(total).map_err(|_| Error::new("token count overflow".into()))?;
+                return Err(Error::budget_infeasible(required_tokens, max_tokens));
             }
             for tier in [2, 3] {
                 for i in (1..n).rev() {
@@ -824,7 +866,7 @@ impl Database {
         }
         let total = output_cost(&kept);
         let total_tokens =
-            u64::try_from(total).map_err(|_| Error("token count overflow".into()))?;
+            u64::try_from(total).map_err(|_| Error::new("token count overflow".into()))?;
         let mut segments = Vec::new();
         let mut i = 1;
         let mut result_count = 0;
@@ -850,16 +892,16 @@ impl Database {
                 to: path[b].clone(),
             };
             if !t.placeholders.contains_key(&range) {
-                t.nodes[&path[a - 1]]
+                t.any_node(&path[a - 1])?
                     .prefix_tokens
                     .checked_add(RESERVE)
-                    .ok_or_else(|| Error("token count overflow".into()))?;
+                    .ok_or_else(|| Error::new("token count overflow".into()))?;
                 new_count += 1;
             }
         }
         self.next_node
             .checked_add(new_count)
-            .ok_or_else(|| Error("node id counter exhausted".into()))?;
+            .ok_or_else(|| Error::new("node id counter exhausted".into()))?;
         let mut summaries_created = Vec::new();
         let mut replacements = HashMap::new();
         let mut created_ends = HashSet::new();
@@ -894,7 +936,7 @@ impl Database {
         let mut furthest = None;
         let t = self.timeline(tl)?;
         for (i, id) in path.iter().enumerate().skip(1) {
-            if !t.nodes[id].pinned && t.covers(id) == 0 {
+            if !t.any_node(id)?.pinned && t.covers(id) == 0 {
                 break;
             }
             if created_ends.contains(&i) {
@@ -909,11 +951,11 @@ impl Database {
         let mut i = 1;
         while i < n {
             if kept[i] {
-                messages.push(t.nodes[&path[i]].message.clone().unwrap());
+                messages.push(t.node(&path[i])?.message.clone().unwrap());
                 i += 1;
             } else {
                 let (end, id) = &replacements[&i];
-                messages.push(t.nodes[id].message.clone().unwrap());
+                messages.push(t.node(id)?.message.clone().unwrap());
                 i = end + 1;
             }
         }
@@ -932,7 +974,7 @@ impl Database {
             let number = id
                 .strip_prefix("tl")
                 .and_then(|s| s.parse::<u64>().ok())
-                .ok_or_else(|| Error("invalid timeline id".into()))?;
+                .ok_or_else(|| Error::new("invalid timeline id".into()))?;
             if number >= self.next_timeline || id != &t.id {
                 return err("timeline counter or identity is invalid");
             }
@@ -940,7 +982,7 @@ impl Database {
                 validate_node_id(node)?;
                 let number = node[1..]
                     .parse::<u64>()
-                    .map_err(|_| Error("node id counter overflow".into()))?;
+                    .map_err(|_| Error::new("node id counter overflow".into()))?;
                 if number >= self.next_node || !global.insert(node.clone()) {
                     return err("node counter or global identity is invalid");
                 }
@@ -966,16 +1008,11 @@ impl Timeline {
                     return err("root must have no message or summary");
                 }
             } else {
-                if self.nodes.contains_key(id)
-                    && !self.nodes.contains_key(n.parent.as_deref().unwrap())
-                {
-                    return err("active node cannot descend from archived history");
-                }
                 self.any_node(n.parent.as_deref().unwrap())?;
                 let m = n
                     .message
                     .as_ref()
-                    .ok_or_else(|| Error("nonroot node has no message".into()))?;
+                    .ok_or_else(|| Error::new("nonroot node has no message".into()))?;
                 message(&m.role, &m.text, Some(m.tokens))?;
             }
             let mut unique = HashSet::new();
@@ -1003,7 +1040,7 @@ impl Timeline {
             let n = self.any_node(&id)?;
             let sum = parent_cost
                 .checked_add(n.cost())
-                .ok_or_else(|| Error("token count overflow".into()))?;
+                .ok_or_else(|| Error::new("token count overflow".into()))?;
             prefixes.insert(id.clone(), sum);
             for child in &n.children {
                 queue.push((child.clone(), sum));
@@ -1027,7 +1064,7 @@ impl Timeline {
         }
         for (name, head) in &self.branches {
             validate_branch(name)?;
-            self.node(head)?;
+            self.hot_node(head)?;
         }
         self.covers.clear();
         self.semantic_covers.clear();
@@ -1127,7 +1164,8 @@ impl Timeline {
         if let Some(w) = self.watermark.clone() {
             let path = self.path(&w)?;
             if path.iter().any(|id| {
-                self.nodes[id].message.is_some() && !self.nodes[id].pinned && self.covers(id) == 0
+                let node = self.any_node(id).expect("validated path");
+                node.message.is_some() && !node.pinned && self.covers(id) == 0
             }) {
                 return err("watermark contains uncovered history");
             }

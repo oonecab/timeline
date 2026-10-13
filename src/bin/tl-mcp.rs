@@ -115,7 +115,13 @@ fn handle(
                     }
                     result
                 }
-                Err(reason) => return Some(error(id, -32000, &reason.to_string())),
+                Err(reason) => {
+                    let mut response = error(id, -32000, &reason.to_string());
+                    if let Some(data) = reason.data {
+                        response["error"]["data"] = data;
+                    }
+                    return Some(response);
+                }
             }
         }
         _ => return Some(error(id, -32601, "method not found")),

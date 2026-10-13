@@ -20,8 +20,8 @@
 
 - [README](../README.md)：构建、CLI/MCP、token 与预算、存储和恢复说明。
 - [TIMELINE-SPEC.md](../TIMELINE-SPEC.md)：权威构建规格、§9 测试映射与 §13 验收清单。
-- [SPEC-NOTES.md](SPEC-NOTES.md)：规格冲突、实现选择及回归；不暗中改写原规格。
-- [ACCEPTANCE.md](ACCEPTANCE.md)：本次 §13 逐项结果、62 项测试分组与实际执行证据。
+- [SPEC-NOTES.md](SPEC-NOTES.md)：v1.1.1/v1.1.2 已解决的历史冲突、当前边界解释与回归设计。
+- [ACCEPTANCE.md](ACCEPTANCE.md)：最新 §13 逐项结果、测试分组与实际执行证据。
 - [TECH.md](../TECH.md)：技术事实、模块边界、兼容性与技术栈变更索引。
 - [environments.md](environments.md)：非秘密变量、路径优先级及运行环境。
 - [tests](../tests) 与 [acceptance.py](../scripts/acceptance.py)：可执行验收；运行日志位于 target/acceptance，最终结果由交付统一记录。

@@ -39,7 +39,7 @@
 - 单 JSON 文件 format_version=1；稳定 sidecar 文件锁串行化事务；临时快照 fsync 后原子替换并保留 .bak。
 - MCP 提供 14 个工具，按行处理 stdio JSON-RPC；应用运行期间不访问网络、不监听端口。
 - 源数据持久化，派生字段和索引读取时重建；每次成功变更全量 checkpoint，未启用可选增量日志或水位扫描优化。
-- 规范冲突与实现选择记录于 docs/SPEC-NOTES.md；当前归档规则保留全部节点，只移除符合条件的非当前分支指针。
+- 构建依据为 TIMELINE-SPEC v1.1.2；归档将独有原文搬入同文件冷区，摘要保留在热区，原文及 parent/children 不变；只读查询跨冷热区。预算不可行返回 budget infeasible 与 required_tokens/max_tokens；历史修正与边界解释见 docs/SPEC-NOTES.md。
 
 ## 项目类型约束
 
@@ -60,11 +60,13 @@
 - `src/storage.rs`：路径、稳定 sidecar 文件锁、事务、Unix 秒时间、7 天幂等结果、全量原子快照及上一版本 `.bak`。持久化计数器载入 Database 后由核心在事务内分配；核心不读取时钟或产生随机 ID。
 - `src/service.rs`：14 项工具的参数校验与分发；`src/bin/tl.rs`、`src/bin/tl-mcp.rs` 分别提供 CLI 与逐行 stdio JSON-RPC。
 - `tests/`：公理与随机场景、CLI/MCP 全流程、损坏/旧格式、幂等、并发及平台权限；存储回归仅操作临时目录。`scripts/acceptance.py` 一键执行已登记检查，日志写入 `target/acceptance/`。
-- 数据格式保持 v1；新元数据缺失按规格补齐，损坏的 prefix_tokens/stale 丢弃后重建；parent/children/message/branches 等源数据损坏拒绝读取及覆盖。
+- 数据格式保持 v1，MCP 工具集版本保持 1.1.0；新元数据缺失按规格补齐，损坏的 prefix_tokens/stale 丢弃后重建；parent/children/message/branches 等源数据损坏拒绝读取及覆盖。
+- 归档把独有无 pin 原文从 nodes 搬到 archive；摘要留热，允许其 parent 指向冷区，不改写 parent/children/message。核心节点、路径、context、tokens 及索引重建读取两区；fork 必须以热节点为起点，显式冷区恢复预留给 v1.2。
+- 预算不可行错误的消息为 budget infeasible，数据为最低布局总成本 required_tokens 和输入 max_tokens；CLI 在 error/data 返回，MCP 在 JSON-RPC error.message/data 返回。失败不提交任何变更。
 - 派生状态包括 prefix_tokens、covers、真实摘要语义覆盖、占位复用、真实摘要区间、摘要参数索引、版本后继、依赖反向关系、水位路径和 stale；refcount 按查询计算。完整清单见 [README](README.md)。
 - 新建快照、备份、锁在 Windows 使用创建时受保护 DACL `D:P(A;;FA;;;OW)`，已实测；Unix 为 0600，本次未执行。Windows 通过 tempfile 的 MoveFileExW 覆盖，Unix 通过 rename 并同步父目录，不先删除目标。
 - 应用只读取 TIMELINE_DB/USERPROFILE/HOME，不自动加载 `.env`；无外部服务、网络访问或监听端口。环境权威清单见 [docs/environments.md](docs/environments.md)。
-- [TIMELINE-SPEC.md](TIMELINE-SPEC.md) 是构建权威；预算、不可变回填、unpin、占位、水位和归档的冲突与选择见 [docs/SPEC-NOTES.md](docs/SPEC-NOTES.md)。未启用增量日志；水位优化的两个参数值目前执行相同全路径扫描。
+- [TIMELINE-SPEC.md](TIMELINE-SPEC.md) v1.1.2 是构建权威；已解决的预算与归档冲突，以及不可变回填、unpin、占位和水位边界解释见 [docs/SPEC-NOTES.md](docs/SPEC-NOTES.md)。未启用增量日志；水位优化的两个参数值目前执行相同全路径扫描。
 
 ## 技术栈变更索引（只追加）
 

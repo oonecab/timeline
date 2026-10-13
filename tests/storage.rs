@@ -131,7 +131,7 @@ fn operation_failure_rolls_back_every_field_and_preserves_backup() {
     let original = fs::read(&path).unwrap();
     let error = storage.transaction("scope", Some("failed"), |db| {
         db.next_node += 99;
-        Err(Error("intentional rejected operation".into()))
+        Err(Error::new("intentional rejected operation".into()))
     });
     assert!(error.is_err());
     assert_eq!(fs::read(path).unwrap(), original);
