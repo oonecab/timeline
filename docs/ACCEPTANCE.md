@@ -8,12 +8,12 @@
 
 | Runner | 已记录的证据 | 产物 |
 |---|---|---|
-| `windows-latest` | 提交 `62602c0` 的 CI 通过 | `timeline-windows-latest` |
-| `ubuntu-latest` | 提交 `62602c0` 的 CI 通过 | `timeline-ubuntu-latest` |
-| `macos-latest`（Apple Silicon） | 提交 `62602c0` 的 CI 通过 | `timeline-macos-latest` |
-| `macos-15-intel`（Intel） | 已纳入矩阵，是否通过以对应运行结果为准 | `timeline-macos-15-intel` |
+| `windows-latest` | 提交 `2db1761` 的 CI 通过 | `timeline-windows-latest` |
+| `ubuntu-latest` | 提交 `2db1761` 的 CI 通过 | `timeline-ubuntu-latest` |
+| `macos-latest`（Apple Silicon） | 提交 `2db1761` 的 CI 通过 | `timeline-macos-latest` |
+| `macos-15-intel`（Intel） | 提交 `2db1761` 的原生完整 CI 通过 | `timeline-macos-15-intel` |
 
-三平台已通过的记录为 [Actions 运行 38405720276](https://github.com/oonecab/timeline/actions/runs/38405720276)，对应[提交 `62602c0`](https://github.com/oonecab/timeline/commit/62602c017e6528e2edaea9caed3bcb1c2c752a37)。其中 Ubuntu/macOS 执行了 Unix `0600` 权限回归，Windows 执行了受保护 DACL 回归；这些结果覆盖该次运行的 runner 环境，不代表所有系统版本与 CPU 架构都已验证。
+四平台结果来自 [Actions 运行 38409120427](https://github.com/oonecab/timeline/actions/runs/38409120427)，对应[提交 `2db1761`](https://github.com/oonecab/timeline/commit/2db17614f84cf27873990e4bf3959b00273d418a)。Intel Mac 与另外三项均完成了测试、Clippy、格式检查、Release 构建和对应产物上传。其中 Ubuntu 和两种 Mac 执行了 Unix `0600` 权限回归，Windows 执行了受保护 DACL 回归；这些结果覆盖该次 runner 环境，不代表所有系统版本与 CPU 架构都已验证。此前三平台记录仍可查看 [运行 38405720276](https://github.com/oonecab/timeline/actions/runs/38405720276)。
 
 后续提交的四平台结果和产物见 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml)；本表保留已确认的运行记录，Intel 检查结果尚待补充。Intel runner 的可用性与包的选择见 [运行环境](environments.md#ci-平台与兼容范围)。
 

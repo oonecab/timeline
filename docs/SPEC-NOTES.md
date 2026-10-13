@@ -56,7 +56,7 @@ v1.1.1 已移除第 4 步的“无摘要覆盖”限制。当前实现仍逐项�
 
 - §5.4 水位快速扫描为可选优化，当前**未启用**。`context_budget_with_watermark(..., enabled)` 的两个选项均走同一完整扫描算法，等价性测试通过不能证明存在优化加速。
 - 增量 checkpoint 为可选项，当前每次成功事务保存完整原子快照，不维护操作 replay 文件。
-- Linux/macOS 新建快照、备份与锁文件使用 `0600`；Windows 创建时使用受保护的仅所有者可访问 DACL。对应权限测试按平台编译和运行，不能从 Windows 本地结果推断 Unix 结果。已有三平台 CI 通过记录；新增 Intel Mac job 也执行完整测试，具体结果见 [验收记录](ACCEPTANCE.md#跨平台-ci)。平台差异集中在二进制、路径和文件系统操作，不改变上述预算、归档与幂等契约。
+- Linux/macOS 新建快照、备份与锁文件使用 `0600`；Windows 创建时使用受保护的仅所有者可访问 DACL。对应权限测试按平台编译和运行，不能从 Windows 本地结果推断 Unix 结果。Windows、Ubuntu、Apple Silicon Mac 和 Intel Mac 的完整 CI 均有通过记录，具体结果见 [验收记录](ACCEPTANCE.md#跨平台-ci)。平台差异集中在二进制、路径和文件系统操作，不改变上述预算、归档与幂等契约。
 - v1.1.1 已将 §13 第二项“6 条不变量”修正为 10 条。测试覆盖结构、前缀和、分支、区间、不可变源数据、水位、引用计数和版本链；O(1) `tokens` 由直接字段读取实现，不靠计时测试推断。
 
 可执行回归见 `tests/axioms.rs`、`tests/adversarial.rs`、`tests/spec_v112.rs` 和 `tests/interfaces.rs`；实际执行结果见 [ACCEPTANCE.md](ACCEPTANCE.md)，各平台的使用方式见 [运行环境](environments.md)。跨平台文档更新只补充平台说明，没有修改本页的计算规则、协议或存储格式。
