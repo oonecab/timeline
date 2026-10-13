@@ -15,7 +15,7 @@
 
 四平台结果来自 [Actions 运行 38409120427](https://github.com/oonecab/timeline/actions/runs/38409120427)，对应[提交 `2db1761`](https://github.com/oonecab/timeline/commit/2db17614f84cf27873990e4bf3959b00273d418a)。Intel Mac 与另外三项均完成了测试、Clippy、格式检查、Release 构建和对应产物上传。其中 Ubuntu 和两种 Mac 执行了 Unix `0600` 权限回归，Windows 执行了受保护 DACL 回归；这些结果覆盖该次 runner 环境，不代表所有系统版本与 CPU 架构都已验证。此前三平台记录仍可查看 [运行 38405720276](https://github.com/oonecab/timeline/actions/runs/38405720276)。
 
-后续提交的四平台结果和产物见 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml)；本表保留已确认的运行记录，Intel 检查结果尚待补充。Intel runner 的可用性与包的选择见 [运行环境](environments.md#ci-平台与兼容范围)。
+后续提交的四平台结果和产物见 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml)；本表保留已确认的运行记录。Intel runner 的可用性与包的选择见 [运行环境](environments.md#ci-平台与兼容范围)。
 
 ## 本地 §13 验收：2026-10-13
 
@@ -92,3 +92,11 @@ python3 scripts/acceptance.py
 ## 跨平台文档更新范围
 
 增加 Intel Mac CI 矩阵项时，同步补充了各平台的下载、启动、数据库路径、MCP 配置及恢复说明，并将历史本地验收与持续 CI 证据分开记录。此次调整不改变协议、业务规则、数据库格式、环境变量或依赖；现有回归测试继续由各平台 CI 执行。
+
+## Tag 发布工作流验证：2026-10-13
+
+新增 [Release 工作流](../.github/workflows/release.yml) 后，本地重新运行了 `.project-governance.json` 登记的 fetch、fmt、clippy、test 和 release build，五项退出码均为 0；Windows 测试 74 通过、0 失败、0 忽略。证据保存在未提交的 `target/prepush-release-validation/`。
+
+本地还检查了 YAML 中的 tag 触发、四平台矩阵、发布依赖与权限、四个完整资产路径，并确认 Release 与现有 CI 的检查和构建步骤一致。执行了工作流中的 Windows 打包命令，确认 ZIP 根目录只有 `tl.exe`、`tl-mcp.exe`，解压后两者的 `--help` 均成功；Unix 打包命令通过 Bash 语法检查。未创建 tag，因此没有执行远端 Release 发布；Linux/macOS 的本次打包和上传仍需实际 tag 运行验证。actionlint 未能运行：本机未安装，下载工具时 GitHub TLS 连接失败；以上 YAML 结构及 shell 检查是本次替代验证。
+
+下载与发布说明已同步到 README、环境说明、文档索引和 [发布指南](releases.md)，技术事实已同步到 TECH。此次仅增加 GitHub Actions 发布流程，未改变应用依赖、运行时环境变量、数据库格式或业务规则，因此无需更新应用环境清单及业务规则测试。

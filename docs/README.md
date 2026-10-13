@@ -21,6 +21,7 @@
 | 想了解的内容 | 文档 |
 |---|---|
 | 下载与启动、CLI/MCP 配置、预算、存储与恢复 | [README](../README.md) |
+| 用 tag 发布四平台二进制、发布权限与重跑规则 | [发布指南](releases.md) |
 | 各系统的路径与环境变量、执行权限、CI 平台兼容范围 | [运行环境](environments.md) |
 | 架构、模块、依赖及技术栈变更 | [TECH.md](../TECH.md) |
 | 数据模型、操作契约、§9 测试映射与 §13 验收清单 | [TIMELINE-SPEC.md](../TIMELINE-SPEC.md) |
@@ -28,4 +29,4 @@
 | Windows 本地历史验收、持续 CI 与各平台的执行证据 | [ACCEPTANCE.md](ACCEPTANCE.md) |
 | Agent 如何在仓库中协作 | [AGENTS.md](../AGENTS.md) |
 
-[tests](../tests) 保存可执行回归，[acceptance.py](../scripts/acceptance.py) 可一次运行本地格式、静态检查、测试和 Release 构建，日志写入 `target/acceptance/`。远端检查由 [CI 工作流](../.github/workflows/ci.yml) 执行，结果和二进制产物保存在 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml) 的对应运行中。
+[tests](../tests) 保存可执行回归，[acceptance.py](../scripts/acceptance.py) 可一次运行本地格式、静态检查、测试和 Release 构建，日志写入 `target/acceptance/`。日常远端检查由 [CI 工作流](../.github/workflows/ci.yml) 执行，结果和未发布构建保存在 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml) 的对应运行中。推送 tag 后，[Release 工作流](../.github/workflows/release.yml) 会在四平台检查通过后将二进制包发布到 [Releases](https://github.com/oonecab/timeline/releases)。

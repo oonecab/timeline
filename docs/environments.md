@@ -4,9 +4,9 @@ Timeline 的 CLI 和 MCP 服务都是本机二进制。运行时不需要 Rust�
 
 ## CI 平台与兼容范围
 
-从 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml) 中选择一次成功的 CI 运行，下载对应系统和 CPU 架构的 artifact。Windows 包含 `tl.exe`、`tl-mcp.exe`；Linux/macOS 包含 `tl`、`tl-mcp`。下载步骤和各平台包名见 [README](../README.md)。
+优先从 [Releases](https://github.com/oonecab/timeline/releases) 下载对应系统和 CPU 架构的包；未发布的提交可从 [CI Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml) 的成功运行下载 artifact。Windows 包含 `tl.exe`、`tl-mcp.exe`；Linux/macOS 包含 `tl`、`tl-mcp`。下载步骤和各平台包名见 [README](../README.md)。
 
-Linux/macOS 解压 ZIP 后需要恢复执行权限，在二进制所在目录运行：
+Linux/macOS 的 Release `.tar.gz` 保留执行权限，使用 `tar -xzf 包名.tar.gz` 正常解压后即可运行 `./tl --help`。如果使用 Actions artifact ZIP，解压后需要恢复执行权限：
 
 ```sh
 chmod +x tl tl-mcp
@@ -15,7 +15,7 @@ chmod +x tl tl-mcp
 
 Windows PowerShell 在解压目录运行 `./tl.exe --help` 即可。若目录没有加入 `PATH`，使用 `./`、PowerShell 的 `.\` 或完整路径调用；MCP 配置建议始终使用二进制的绝对路径。
 
-CI 产物面向对应 runner 的系统和架构：Apple Silicon 与 Intel Mac 使用不同的包。Intel 的 `macos-15-intel` runner 当前可用，但已有生命周期公告。[GitHub 曾公告该标签提供至 2027 年 8 月](https://github.com/actions/runner-images/issues/13045)，后续可用性以最新 runner 公告为准，不应依赖这一标签长期存在。包可以下载不等于兼容所有旧系统或 Linux 发行版；CI 验证范围见 [验收记录](ACCEPTANCE.md#跨平台-ci)。
+CI 与 Release 产物都面向对应 runner 的系统和架构：Apple Silicon 与 Intel Mac 使用不同的包。Intel 的 `macos-15-intel` runner 当前可用，但已有生命周期公告。[GitHub 曾公告该标签提供至 2027 年 8 月](https://github.com/actions/runner-images/issues/13045)，后续可用性以最新 runner 公告为准，不应依赖这一标签长期存在。包可以下载不等于兼容所有旧系统或 Linux 发行版；CI 验证范围见 [验收记录](ACCEPTANCE.md#跨平台-ci)，发布流程见 [发布指南](releases.md)。
 
 ## 数据库路径
 
@@ -88,3 +88,5 @@ export TIMELINE_DB="$HOME/.local/share/timeline/conversation.timeline.json"
 本地验收脚本在 Windows 可用 `python scripts/acceptance.py`，在 Linux/macOS 通常用 `python3 scripts/acceptance.py`。构建出的文件位于 `target/release/`，Windows 带 `.exe` 后缀，Linux/macOS 不带后缀。
 
 已执行的平台检查、历史工具链版本与测试证据见 [ACCEPTANCE.md](ACCEPTANCE.md)。机器可读清单见 [`.project-governance.json`](../.project-governance.json)，技术边界见 [`TECH.md`](../TECH.md)。
+
+Release 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN`，仅发布 job 获得 `contents: write` 权限。无需添加手工 secret 或本地环境变量；上方应用运行时的变量和路径规则保持不变。维护者操作见 [发布指南](releases.md)。

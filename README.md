@@ -2,7 +2,7 @@
 
 Timeline 用来保存 LLM 对话、探索不同分支，并在压缩上下文后保留可回看的原文。它提供两个程序：`tl` 供终端和脚本使用，`tl-mcp` 供 MCP 客户端使用；两者共用本地 JSON 数据库。
 
-Windows、Linux、Apple Silicon Mac 和 Intel Mac 都有对应的 CI 构建包，下载后无需安装 Rust。程序运行时不联网、不监听端口，也不依赖后台服务。
+Windows、Linux、Apple Silicon Mac 和 Intel Mac 使用各自的二进制包，下载后无需安装 Rust。程序运行时不联网、不监听端口，也不依赖后台服务。
 
 第一次使用可以从下面的下载步骤开始；接入客户端见 [MCP 配置](#mcp-stdio-接入)，路径与权限见 [环境说明](docs/environments.md)。实现遵循 [TIMELINE-SPEC v1.1.2](TIMELINE-SPEC.md)，设计边界与历史修正见 [SPEC-NOTES](docs/SPEC-NOTES.md)。
 
@@ -10,14 +10,16 @@ Windows、Linux、Apple Silicon Mac 和 Intel Mac 都有对应的 CI 构建包�
 
 ### 选择系统和芯片对应的包
 
-打开 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml)，选择所需提交的一次成功运行，在 **Artifacts** 下载对应的 ZIP。解压后有两个文件：
+优先打开 [Releases](https://github.com/oonecab/timeline/releases)，选择所需版本，在 **Assets** 下载系统和芯片对应的包。每个包解压后只有两个二进制文件：
 
-| 目标机器 | CPU 架构 | Artifact | ZIP 内的文件 |
+| 目标机器 | CPU 架构 | Release 资产 | 包内文件 |
 |---|---|---|---|
-| Windows | x64 | `timeline-windows-latest` | `tl.exe`、`tl-mcp.exe` |
-| Linux | x64 | `timeline-ubuntu-latest` | `tl`、`tl-mcp` |
-| Apple Silicon Mac | arm64 | `timeline-macos-latest` | `tl`、`tl-mcp` |
-| Intel Mac | x64 | `timeline-macos-15-intel` | `tl`、`tl-mcp` |
+| Windows | x64 | `timeline-windows-latest.zip` | `tl.exe`、`tl-mcp.exe` |
+| Linux | x64 | `timeline-ubuntu-latest.tar.gz` | `tl`、`tl-mcp` |
+| Apple Silicon Mac | arm64 | `timeline-macos-latest.tar.gz` | `tl`、`tl-mcp` |
+| Intel Mac | x64 | `timeline-macos-15-intel.tar.gz` | `tl`、`tl-mcp` |
+
+如果所需提交尚未发布，也可以在 [CI Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml) 的成功运行中下载 **Artifacts**。这些未发布构建使用相同的平台名，例如 `timeline-macos-15-intel`，由 Actions 打包为 ZIP。GitHub 自动附带的 **Source code** 包是源码，不能直接当作二进制使用。
 
 包按对应 runner 的原生目标构建，目标机器需要匹配 CPU 架构和兼容的系统版本。Linux 包不是所有发行版通用的静态包，两个 Mac 包也不是 Universal Binary；runner 上通过测试不等于验证过所有旧系统。`-latest` 会更新，具体构建环境可查看那次运行的日志。
 
@@ -33,16 +35,18 @@ New-Item -ItemType Directory -Force "$env:USERPROFILE\timeline-data" | Out-Null
 .\tl.exe --db "$env:USERPROFILE\timeline-data\conversation.timeline.json" create
 ```
 
-### Linux / macOS：恢复执行权限后启动
+### Linux / macOS：解压后启动
 
-在解压后的目录打开终端。Actions 的 ZIP [不保留执行权限](https://github.com/actions/upload-artifact/blob/v4/README.md#permission-loss)，因此先运行 `chmod`。下面的命令适用于 bash 和 zsh：
+Release 的 `.tar.gz` 保留执行权限，正常解压后即可启动。下面以 Linux 包为例；Mac 使用表中对应的文件名。命令适用于 bash 和 zsh：
 
 ```sh
-chmod +x tl tl-mcp
+tar -xzf timeline-ubuntu-latest.tar.gz
 ./tl --help
 mkdir -p "$HOME/.local/share/timeline"
 ./tl --db "$HOME/.local/share/timeline/conversation.timeline.json" create
 ```
+
+如果下载的是 Actions artifact ZIP，解压后先运行 `chmod +x tl tl-mcp`，再执行 `./tl --help`。Actions 的 ZIP [不保留执行权限](https://github.com/actions/upload-artifact/blob/v4/README.md#permission-loss)。
 
 不确定 Mac 的芯片类型时，可以查看“关于本机”，或在原生终端执行 `uname -m`：`arm64` 选 Apple Silicon 包，`x86_64` 选 Intel 包。Rosetta 终端可能报告仿真架构，以实际芯片为准。
 
@@ -63,6 +67,8 @@ cargo build --release --locked
 也可以运行 `python scripts/acceptance.py`；Linux/macOS 上如果 Python 命令名为 `python3`，使用 `python3 scripts/acceptance.py`。脚本会把输出写入 `target/acceptance/`。Python 只用于验收脚本，运行下载的二进制不需要它。
 
 [CI 工作流](.github/workflows/ci.yml) 在 push 和 pull_request 时，对表中四个 runner 执行相同的 test、clippy、fmt、Release 构建及产物上传步骤。测试使用临时数据库，具体覆盖范围和已确认的结果见 [验收记录](docs/ACCEPTANCE.md)。
+
+[Release 工作流](.github/workflows/release.yml) 在推送 tag 时运行相同的四平台检查，全部成功后才发布二进制和自动生成的发布说明。维护者的打 tag 步骤、重跑行为和权限说明见 [发布指南](docs/releases.md)。
 
 本机构建产物在 `target/release/`：Windows 是 `tl.exe`、`tl-mcp.exe`，Linux/macOS 是 `tl`、`tl-mcp`。开发时也可通过 Cargo 启动：
 
@@ -248,4 +254,4 @@ macOS（Apple Silicon 和 Intel 配置形式相同，使用各自的包）：
 
 所有版本的成功结果均在 `result.content[0].text` 中保存工具 JSON 字符串；2025-06-18 及以后的对象结果同时返回 structuredContent。幂等键可在 arguments 或 params 中，两处同时提供须一致。领域错误 code=-32000，协议错误使用对应标准错误码；通知不回应也不执行变更工具。预算不可行返回 `error` 对象 `{"code":-32000,"message":"budget infeasible","data":{"required_tokens":65,"max_tokens":1}}`（此数值对应上文反例）。
 
-更多信息：[技术事实](TECH.md)、[文档索引](docs/README.md)、[环境说明](docs/environments.md)、[机器可读检查命令](.project-governance.json)。
+更多信息：[技术事实](TECH.md)、[文档索引](docs/README.md)、[环境说明](docs/environments.md)、[发布指南](docs/releases.md)、[机器可读检查命令](.project-governance.json)。

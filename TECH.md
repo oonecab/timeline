@@ -61,6 +61,7 @@
 - `src/service.rs`：14 项工具的参数校验与分发；`src/bin/tl.rs`、`src/bin/tl-mcp.rs` 分别提供 CLI 与逐行 stdio JSON-RPC。
 - `tests/`：公理与随机场景、CLI/MCP 全流程、损坏/旧格式、幂等、并发及平台权限；存储回归仅操作临时目录。`scripts/acceptance.py` 一键执行已登记检查，日志写入 `target/acceptance/`。
 - `.github/workflows/ci.yml`：GitHub Actions 在 push/pull_request 时使用 stable Rust，分别在 `ubuntu-latest`（x64）、`macos-latest`（arm64）、`macos-15-intel`（x64）和 `windows-latest`（x64）执行 test、clippy、fmt，再构建 Release。四个 job 执行相同检查，包括 Intel Mac 上的原生测试。产物命名为 `timeline-${{ matrix.os }}`，只包含对应 runner 的 `tl`/`tl-mcp`（Windows 为 `.exe`）。
+- `.github/workflows/release.yml`：推送任意 tag 时，在上述四个平台重新执行相同检查与构建；四个平台全部成功后，由独立 job 发布该 tag 的 GitHub Release。Windows 包为 ZIP，Linux/macOS 包为保留执行权限的 tar.gz，每包根目录仅含两个二进制。构建 job 只有 `contents: read`，发布 job 通过 GitHub 自动提供的令牌获得 `contents: write`；未增加应用环境变量或外部运行时服务。发布步骤和下载方式见 [发布说明](docs/releases.md)。
 - CI 二进制需要匹配使用者的系统及 CPU 架构；Intel Mac 包不是通用 macOS 包，也不保证所有旧版 macOS 都兼容。`macos-15-intel` 的可用期受 GitHub 镜像弃用安排约束，不能作为永久分发渠道；平台选择及官方公告见 [环境说明](docs/environments.md)，实际测试结果见 [验收记录](docs/ACCEPTANCE.md)。
 - 数据格式保持 v1，MCP 工具集版本保持 1.1.0；新元数据缺失按规格补齐，损坏的 prefix_tokens/stale 丢弃后重建；parent/children/message/branches 等源数据损坏拒绝读取及覆盖。
 - 归档把独有无 pin 原文从 nodes 搬到 archive；摘要留热，允许其 parent 指向冷区，不改写 parent/children/message。核心节点、路径、context、tokens 及索引重建读取两区；fork 必须以热节点为起点，显式冷区恢复预留给 v1.2。

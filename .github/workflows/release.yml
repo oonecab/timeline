@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-15-intel, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: test
+        run: cargo test --locked
+      - name: clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: fmt
+        run: cargo fmt --check
+      - name: build release binaries
+        run: cargo build --release --locked
+      - name: package Windows binaries
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Compress-Archive -Path target/release/tl.exe, target/release/tl-mcp.exe -DestinationPath dist/timeline-${{ matrix.os }}.zip -Force
+      - name: package Linux and macOS binaries
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          tar -czf "dist/timeline-${{ matrix.os }}.tar.gz" -C target/release tl tl-mcp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}
+          path: dist/*
+          if-no-files-found: error
+          overwrite: true
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/timeline-windows-latest.zip
+            dist/timeline-ubuntu-latest.tar.gz
+            dist/timeline-macos-latest.tar.gz
+            dist/timeline-macos-15-intel.tar.gz
