@@ -22,6 +22,8 @@ cargo build --release --locked
 
 最新检查结果、测试分组及平台范围见 [§13 逐项验收记录](docs/ACCEPTANCE.md)，其中也声明尚未启用的可选优化。
 
+[GitHub Actions CI](.github/workflows/ci.yml) 在 push 和 pull_request 时，使用 stable Rust 在 Ubuntu、macOS、Windows 上分别执行测试、Clippy 严格检查和格式检查。各次远端检查的实际结果见 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml)。
+
 构建产物为 `target/release/tl`、`target/release/tl-mcp`，Windows 带 `.exe`。将产物加入 PATH，或直接通过 Cargo 运行：
 
 ```sh
