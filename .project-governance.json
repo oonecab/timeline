@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "project": {
+    "name": "Timeline",
+    "summary": "给 LLM 对话提供持久化分支、可逆摘要和 MCP 接口",
+    "profile": "generic",
+    "governance_level": "lean"
+  },
+  "technology": {
+    "languages": [
+      "Rust 2024 edition（Cargo 声明 rust-version 1.85；当前验证工具链 1.97.1）"
+    ],
+    "frameworks": [
+      "serde 1 / serde_json 1：JSON 数据模型与协议",
+      "clap 4：CLI 参数",
+      "fs2 0.4：跨进程文件锁",
+      "tempfile 3：同目录原子快照",
+      "windows-sys 0.61：Windows 创建时的私有 DACL"
+    ],
+    "runtimes": [
+      "Rust / Cargo；运行时为本机原生二进制，无外部服务"
+    ],
+    "source_directories": [
+      "src",
+      "tests"
+    ],
+    "architecture_notes": [
+      "纯内存 Core → JSON Storage → CLI / stdio MCP；Core 无 I/O、时钟或随机数。",
+      "单 JSON 文件 format_version=1；稳定 sidecar 文件锁串行化事务；临时快照 fsync 后原子替换并保留 .bak。",
+      "MCP 提供 14 个工具，按行处理 stdio JSON-RPC；应用运行期间不访问网络、不监听端口。",
+      "源数据持久化，派生字段和索引读取时重建；每次成功变更全量 checkpoint，未启用可选增量日志或水位扫描优化。",
+      "规范冲突与实现选择记录于 docs/SPEC-NOTES.md；当前归档规则保留全部节点，只移除符合条件的非当前分支指针。"
+    ]
+  },
+  "commands": {
+    "setup": [
+      "cargo fetch --locked"
+    ],
+    "test": [
+      "cargo test --all-targets --locked"
+    ],
+    "lint": [
+      "cargo clippy --all-targets --locked -- -D warnings"
+    ],
+    "format": [
+      "cargo fmt --all -- --check"
+    ],
+    "build": [
+      "cargo build --release --locked"
+    ]
+  },
+  "agents": {
+    "codex": true,
+    "claude_code": true,
+    "opencode": true
+  },
+  "environment": {
+    "variables": [
+      "TIMELINE_DB",
+      "USERPROFILE",
+      "HOME"
+    ],
+    "services": [],
+    "ports": []
+  },
+  "security": {
+    "sensitive_data": [
+      "对话原文、摘要、审计内容与幂等结果（含 .bak 副本）"
+    ],
+    "forbidden_actions": [
+      "提交真实对话数据库、备份、密钥或令牌",
+      "在无法读取或验证数据库时静默覆盖原文件",
+      "改写或删除已有审计记录"
+    ]
+  },
+  "project_rules": [
+    "TIMELINE-SPEC.md 是权威构建规格，发现内部冲突时必须在 docs/SPEC-NOTES.md 公开说明。",
+    "单条消息最多 1 MiB UTF-8；上下文输出最多 100000 条消息。",
+    "不得把未启用的可选优化或未执行的平台测试报告为已经实现或验证。"
+  ],
+  "generator": {
+    "name": "init-project-governance",
+    "version": "0.2.1"
+  }
+}

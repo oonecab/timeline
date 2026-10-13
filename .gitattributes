@@ -1,0 +1,13 @@
+# project-governance:managed:start
+* text=auto
+*.md text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.py text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# project-governance:managed:end
+
+# 在下方增加项目专属属性。重新生成时会保留此区域。

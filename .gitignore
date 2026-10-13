@@ -1,0 +1,44 @@
+# project-governance:managed:start
+# 密钥与本地配置
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# 常见生成物
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+dist/
+build/
+coverage/
+.coverage
+
+# 编辑器与操作系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 本地 Agent 状态；共享 Skill 与项目配置可以纳入版本控制
+.claude/settings.local.json
+CLAUDE.local.md
+# project-governance:managed:end
+
+# 在下方增加项目专属规则。重新生成时会保留此区域。
+
+# Rust build/acceptance output; Cargo.lock remains tracked.
+/target/
+
+# Local conversation snapshots, backups, locks and recovery copies.
+/.timeline.json*
+/timeline.json*
+*.timeline.json
+*.timeline.json.bak
+*.timeline.json.lock
+*.timeline.json.corrupt-*
+.timeline-*
