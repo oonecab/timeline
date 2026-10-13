@@ -1,14 +1,56 @@
 # Timeline
 
-给 LLM 对话提供持久化分支、可逆摘要和 stdio MCP 接口的 Rust 项目。`tl` 是 JSON CLI，`tl-mcp` 提供 14 个工具；两者共用带文件锁的 JSON 数据库。Core 无文件 I/O、时钟或网络访问。
+Timeline 用来保存 LLM 对话、探索不同分支，并在压缩上下文后保留可回看的原文。它提供两个程序：`tl` 供终端和脚本使用，`tl-mcp` 供 MCP 客户端使用；两者共用本地 JSON 数据库。
 
-构建依据是 [TIMELINE-SPEC v1.1.2](TIMELINE-SPEC.md)。归档按 v1.1.1 修订搬运被摘要覆盖的独有原文，预算按 v1.1.2 契约返回结构化不可行错误；历史修正依据与其余边界解释见 [SPEC-NOTES](docs/SPEC-NOTES.md)。
+Windows、Linux、Apple Silicon Mac 和 Intel Mac 都有对应的 CI 构建包，下载后无需安装 Rust。程序运行时不联网、不监听端口，也不依赖后台服务。
 
-`archive-branch` 将符合条件的分支独有原文从热区 `nodes` 搬到同一 JSON 数据库的 `archive` 区，保留共享节点、摘要及全部原文内容；它减少热区节点数，不承诺缩小数据库文件。只读查询可直接读取归档内容，显式恢复命令预留给 v1.2。
+第一次使用可以从下面的下载步骤开始；接入客户端见 [MCP 配置](#mcp-stdio-接入)，路径与权限见 [环境说明](docs/environments.md)。实现遵循 [TIMELINE-SPEC v1.1.2](TIMELINE-SPEC.md)，设计边界与历史修正见 [SPEC-NOTES](docs/SPEC-NOTES.md)。
 
-## 构建与验收
+## 下载与开始使用
 
-从源码构建需要 Rust/Cargo 及对应的本机链接工具链；也可下载下述 CI 二进制，无需安装 Rust。Cargo 声明 Rust 1.85、edition 2024；本地验收环境为 Windows 上的 Rust/Cargo 1.97.1，未单独验证最低版本；跨平台结果以对应 CI 运行为准。
+### 选择系统和芯片对应的包
+
+打开 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml)，选择所需提交的一次成功运行，在 **Artifacts** 下载对应的 ZIP。解压后有两个文件：
+
+| 目标机器 | CPU 架构 | Artifact | ZIP 内的文件 |
+|---|---|---|---|
+| Windows | x64 | `timeline-windows-latest` | `tl.exe`、`tl-mcp.exe` |
+| Linux | x64 | `timeline-ubuntu-latest` | `tl`、`tl-mcp` |
+| Apple Silicon Mac | arm64 | `timeline-macos-latest` | `tl`、`tl-mcp` |
+| Intel Mac | x64 | `timeline-macos-15-intel` | `tl`、`tl-mcp` |
+
+包按对应 runner 的原生目标构建，目标机器需要匹配 CPU 架构和兼容的系统版本。Linux 包不是所有发行版通用的静态包，两个 Mac 包也不是 Universal Binary；runner 上通过测试不等于验证过所有旧系统。`-latest` 会更新，具体构建环境可查看那次运行的日志。
+
+`macos-15-intel` 当前可用，但已有退出计划，不能把它当作长期不变的分发渠道。Intel 包解决的是 x64 机器的运行需求；CI 也会在这个 Intel runner 上完整运行测试、Clippy 和格式检查，再构建上传。生命周期公告与兼容范围见 [环境说明](docs/environments.md#ci-平台与兼容范围)。
+
+### Windows：解压后启动
+
+把两个 `.exe` 放到一个固定目录，在该目录打开 PowerShell。下面会显示帮助，并在用户目录下创建一个数据库；最后一步只需在第一次使用时执行：
+
+```powershell
+.\tl.exe --help
+New-Item -ItemType Directory -Force "$env:USERPROFILE\timeline-data" | Out-Null
+.\tl.exe --db "$env:USERPROFILE\timeline-data\conversation.timeline.json" create
+```
+
+### Linux / macOS：恢复执行权限后启动
+
+在解压后的目录打开终端。Actions 的 ZIP [不保留执行权限](https://github.com/actions/upload-artifact/blob/v4/README.md#permission-loss)，因此先运行 `chmod`。下面的命令适用于 bash 和 zsh：
+
+```sh
+chmod +x tl tl-mcp
+./tl --help
+mkdir -p "$HOME/.local/share/timeline"
+./tl --db "$HOME/.local/share/timeline/conversation.timeline.json" create
+```
+
+不确定 Mac 的芯片类型时，可以查看“关于本机”，或在原生终端执行 `uname -m`：`arm64` 选 Apple Silicon 包，`x86_64` 选 Intel 包。Rosetta 终端可能报告仿真架构，以实际芯片为准。
+
+随后将 MCP 客户端的 `command` 指向这个固定目录里的 `tl-mcp`。若希望在任意目录输入 `tl`，可以把二进制所在目录加入 PATH；配置方法因 shell 而异，MCP 使用绝对路径则不依赖 PATH。
+
+## 从源码构建与检查
+
+开发或自行编译才需要 Rust/Cargo，以及系统对应的本机链接工具链。项目使用 Rust 2024 edition，Cargo 声明最低 Rust 1.85；CI 使用 stable，最低版本未单独验证。源码构建在四类平台使用相同命令：
 
 ```sh
 cargo fetch --locked
@@ -18,42 +60,18 @@ cargo test --all-targets --locked
 cargo build --release --locked
 ```
 
-也可用 `python scripts/acceptance.py` 一键运行检查，日志保存到 `target/acceptance/commands.log` 和 `target/acceptance/results.json`。Python 仅用于验收/治理脚本，运行程序不需要它。测试使用临时数据库。
+也可以运行 `python scripts/acceptance.py`；Linux/macOS 上如果 Python 命令名为 `python3`，使用 `python3 scripts/acceptance.py`。脚本会把输出写入 `target/acceptance/`。Python 只用于验收脚本，运行下载的二进制不需要它。
 
-最新检查结果、测试分组及平台范围见 [§13 逐项验收记录](docs/ACCEPTANCE.md)，其中也声明尚未启用的可选优化。
+[CI 工作流](.github/workflows/ci.yml) 在 push 和 pull_request 时，对表中四个 runner 执行相同的 test、clippy、fmt、Release 构建及产物上传步骤。测试使用临时数据库，具体覆盖范围和已确认的结果见 [验收记录](docs/ACCEPTANCE.md)。
 
-[GitHub Actions CI](.github/workflows/ci.yml) 在 push 和 pull_request 时，使用 stable Rust 在 Ubuntu、macOS、Windows 上分别执行测试、Clippy 严格检查和格式检查，随后构建并上传 Release 二进制。各次远端检查的实际结果见 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml)。
-
-### 下载二进制，无需编译
-
-在 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml) 打开所需提交的成功运行，在 **Artifacts** 下载对应平台的 ZIP，解压即可取得两个二进制：
-
-| Artifact | ZIP 内的文件 |
-|---|---|
-| `timeline-windows-latest` | `tl.exe`、`tl-mcp.exe` |
-| `timeline-ubuntu-latest` | `tl`、`tl-mcp` |
-| `timeline-macos-latest` | `tl`、`tl-mcp` |
-
-这些包按 [GitHub runner](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) 的原生目标构建：当前 Windows/Linux 为 x64，macOS 为 arm64。目标机器须匹配 CPU 架构并使用兼容的系统版本；`-latest` 会更新，以该次运行的 runner 信息为准。
-
-Windows 解压后可直接运行。Linux/macOS 的 artifact [不保留执行权限](https://github.com/actions/upload-artifact/blob/v4/README.md#permission-loss)，解压后先在所在目录运行：
-
-```sh
-chmod +x tl tl-mcp
-```
-
-然后按 [MCP stdio 接入](#mcp-stdio-接入) 将 `command` 设置为解压后 `tl-mcp`（Windows 为 `tl-mcp.exe`）的绝对路径，并指定数据库路径。使用这些二进制不需要 Rust/Cargo。
-
-### 本地构建产物
-
-构建产物为 `target/release/tl`、`target/release/tl-mcp`，Windows 带 `.exe`。将产物加入 PATH，或直接通过 Cargo 运行：
+本机构建产物在 `target/release/`：Windows 是 `tl.exe`、`tl-mcp.exe`，Linux/macOS 是 `tl`、`tl-mcp`。开发时也可通过 Cargo 启动：
 
 ```sh
 cargo run --bin tl -- --db demo.timeline.json create
 cargo run --bin tl-mcp -- --db demo.timeline.json
 ```
 
-程序运行不访问网络、不依赖外部服务、不监听端口；首次下载依赖可能需要网络。
+首次下载 Cargo 依赖需要网络；这不影响二进制在运行时离线使用。
 
 ## 路径与 CLI
 
@@ -61,7 +79,7 @@ cargo run --bin tl-mcp -- --db demo.timeline.json
 
 所有 CLI 命令均可附带全局参数 `--db PATH`、`--timeline TL`、`--idempotency-key KEY`。省略 timeline 时选择 ID 数字最小、最早创建的 timeline；create 不需要已有 timeline。成功向 stdout 输出 JSON、退出码为 0；错误向 stderr 输出 `{"error":"原因"}`、退出码非零，预算不可行错误另含 `data`（见下文）。`--help`/`--version` 为文本帮助。
 
-下面是完整命令列表。方括号表示可选参数，不要原样输入；ID 应替换为实际返回值。各命令前都可加 `tl --db PATH --timeline TL`。
+下面的示例假设 `tl` 已在 PATH 中。若仍从解压目录运行，Windows 将 `tl` 换为 `.\tl.exe`，Linux/macOS 换为 `./tl`。方括号表示可选参数，节点和时间线 ID 用实际返回值替换。
 
 | CLI | MCP 工具 | 返回形状 |
 |---|---|---|
@@ -133,7 +151,7 @@ Storage 对稳定的 `<db>.lock` 持共享读锁或独占写锁；独占锁覆�
 
 **未实现可选增量 checkpoint 日志，也没有后台 checkpoint 定时器。** 当前每次成功变更均保存全量 JSON 快照。
 
-Unix 新文件为 0600；Windows 创建数据库、备份、锁时使用受保护 owner-only DACL `D:P(A;;FA;;;OW)`，不继承父目录访问项。Windows 权限、原子快照和跨进程并发已实测；Unix 有对应测试但本次未执行。管理员仍拥有操作系统管理权限。内容未加密，应放在受信任的本地目录并避免提交真实数据。
+Linux/macOS 新建的数据库、备份和锁文件权限为 `0600`；Windows 使用受保护的仅所有者可访问 DACL，不继承父目录访问项。对应权限、原子写入和并发回归由各平台 CI 执行，结果见 [验收记录](docs/ACCEPTANCE.md)。文件内容没有加密，管理员仍可通过操作系统管理权限访问；请放在可信目录，也不要把真实对话提交到仓库。
 
 | 派生字段/索引 | 重建方式 |
 |---|---|
@@ -144,37 +162,79 @@ Unix 新文件为 0600；Windows 创建数据库、备份、锁时使用受保�
 | 版本后继、反向依赖、stale | 根据 supersedes/derived_from 重建并传播 |
 | 水位路径集合 | 根据持久化 watermark 与 parent 重建 |
 
-读取时可丢弃任意损坏类型的 prefix_tokens/stale 并重建；源数据损坏仍报错。派生重建和结构验证同时覆盖热区与归档区。format_version 保持 1，缺少 v1.1 新字段的旧文件按规格缺省解释；本次规格修订不改变数据库格式或 MCP 工具集版本。
+读取时会丢弃损坏的 prefix_tokens/stale 并重建；源数据损坏仍会报错。派生重建和结构验证同时覆盖热区与归档区。数据库 `format_version` 为 1，缺少 v1.1 新字段的旧文件按规格补齐；MCP 工具集版本为 1.1.0。
 
 ## 审计与恢复
 
 审计位于 **DB 顶层 audit 数组**。每次真实摘要、修正、新占位创建均记录 Unix 秒 ts、操作、timeline、区间和节点；归档、幂等映射也记日志。Storage 注入不递减时间并拒绝改写/删除旧审计。占位复用不是创建，不重复写创建审计。
 
-按审计 from/to 执行 `node --node FROM` 和 `context --node TO` 可取回原文，旧摘要可按记录 ID 查询。若整个文件损坏，先停用该数据库的 CLI/MCP 进程、保留损坏文件，再显式恢复 .bak。例如手动运行以下 PowerShell（请替换路径）：
+按审计中的 from/to 调用 `node --node FROM` 和 `context --node TO` 可以取回原文，旧摘要也能按 ID 查询。如果数据库文件损坏，先停止使用它的所有 CLI/MCP 进程，确认 `.bak` 存在，保存损坏文件后再恢复。下面给出两种 shell 的示例，路径需换成你实际使用的数据库。
+
+Windows PowerShell：
 
 ```powershell
-$timelineDb = 'C:\timeline-data\conversation.timeline.json'
+$timelineDb = Join-Path $env:USERPROFILE 'timeline-data\conversation.timeline.json'
+if (-not (Test-Path -LiteralPath "$timelineDb.bak")) { throw '未找到数据库备份' }
 $savedBroken = "$timelineDb.corrupt-$(Get-Date -Format yyyyMMdd-HHmmss)"
 Copy-Item -LiteralPath $timelineDb -Destination $savedBroken -ErrorAction Stop
 Copy-Item -LiteralPath "$timelineDb.bak" -Destination $timelineDb -ErrorAction Stop
 tl --db $timelineDb branches
 ```
 
+Linux/macOS（bash 或 zsh）：
+
+```sh
+timeline_db="$HOME/.local/share/timeline/conversation.timeline.json"
+if [ -f "$timeline_db.bak" ]; then
+  cp -p "$timeline_db" "$timeline_db.corrupt-$(date +%Y%m%d-%H%M%S)" &&
+  cp -p "$timeline_db.bak" "$timeline_db" &&
+  tl --db "$timeline_db" branches
+else
+  printf '%s\n' '未找到数据库备份' >&2
+fi
+```
+
 恢复回到上一次成功变更前的快照；首次写入没有旧快照，因此没有 .bak。程序不会自动覆盖损坏文件。
 
 ## MCP stdio 接入
 
-客户端启动 tl-mcp，以 stdin/stdout 交换每行一个 UTF-8 JSON-RPC 2.0 消息。stdout 仅为协议，单帧上限 8 MiB；超限或非法 UTF-8 返回协议错误并继续处理后续帧。以下为通用启动信息，请按所用客户端映射外层配置，不是某个特定客户端的完整配置：
+让客户端启动 `tl-mcp`，并通过 stdin/stdout 与它通信即可。下面是通用启动字段，外层结构按客户端要求填写。将 `YOUR_NAME` 和安装目录换成实际路径，并先创建数据库的父目录；程序不会自动创建目录。
+
+Windows：
 
 ```json
 {
-  "command": "C:\\timeline\\tl-mcp.exe",
-  "args": ["--db", "C:\\timeline-data\\conversation.timeline.json"],
+  "command": "C:\\Users\\YOUR_NAME\\tools\\timeline\\tl-mcp.exe",
+  "args": ["--db", "C:\\Users\\YOUR_NAME\\timeline-data\\conversation.timeline.json"],
   "env": {}
 }
 ```
 
-Unix 替换为对应绝对路径。也可省略 --db，通过进程环境 TIMELINE_DB 指定位置。握手后按以下顺序调用；将 tl0 替换为 create 的实际结果：
+Linux：
+
+```json
+{
+  "command": "/home/YOUR_NAME/.local/bin/timeline/tl-mcp",
+  "args": ["--db", "/home/YOUR_NAME/.local/share/timeline/conversation.timeline.json"],
+  "env": {}
+}
+```
+
+macOS（Apple Silicon 和 Intel 配置形式相同，使用各自的包）：
+
+```json
+{
+  "command": "/Users/YOUR_NAME/.local/bin/timeline/tl-mcp",
+  "args": ["--db", "/Users/YOUR_NAME/.local/share/timeline/conversation.timeline.json"],
+  "env": {}
+}
+```
+
+图形客户端不一定继承终端的 PATH，因此推荐写绝对路径。普通 JSON 字符串中的 `~`、`$HOME`、`%USERPROFILE%` 不应当作已展开的路径；如客户端支持变量替换，按它的说明配置。也可以省略 `--db`，在客户端传入的环境中设置 `TIMELINE_DB`，或使用用户目录下的默认数据库。
+
+### 协议与客户端集成
+
+服务每行收发一个 UTF-8 JSON-RPC 2.0 消息，stdout 只输出协议数据。单帧上限为 8 MiB；超限或非法 UTF-8 会返回协议错误，然后继续处理后续帧。握手和首次创建的消息示例如下；将 `tl0` 换成 create 实际返回的 ID：
 
 ```jsonl
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"example","version":"1"}}}

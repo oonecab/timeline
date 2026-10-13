@@ -14,7 +14,7 @@
 
 ### 语言
 
-- Rust 2024 edition（Cargo 声明 rust-version 1.85；当前验证工具链 1.97.1）
+- Rust 2024 edition（Cargo 声明 rust-version 1.85；Windows 本地验收工具链 1.97.1，CI 使用 stable）
 
 ### 框架与核心库
 
@@ -26,7 +26,7 @@
 
 ### 运行时与工具链
 
-- Rust / Cargo；运行时为本机原生二进制，无外部服务
+- 使用 Rust / Cargo 构建；发布产物是本机原生二进制，运行时无需 Rust 或外部服务。
 
 ## 源码边界
 
@@ -60,12 +60,13 @@
 - `src/storage.rs`：路径、稳定 sidecar 文件锁、事务、Unix 秒时间、7 天幂等结果、全量原子快照及上一版本 `.bak`。持久化计数器载入 Database 后由核心在事务内分配；核心不读取时钟或产生随机 ID。
 - `src/service.rs`：14 项工具的参数校验与分发；`src/bin/tl.rs`、`src/bin/tl-mcp.rs` 分别提供 CLI 与逐行 stdio JSON-RPC。
 - `tests/`：公理与随机场景、CLI/MCP 全流程、损坏/旧格式、幂等、并发及平台权限；存储回归仅操作临时目录。`scripts/acceptance.py` 一键执行已登记检查，日志写入 `target/acceptance/`。
-- `.github/workflows/ci.yml`：GitHub Actions 在 push/pull_request 时使用 stable Rust 和 rustfmt/clippy，按 Ubuntu、macOS、Windows 矩阵执行 test、clippy、fmt，随后构建 Release 并以 `timeline-${{ matrix.os }}` 上传 `tl`/`tl-mcp`（Windows 为 `.exe`）；仅包含对应 runner 原生平台的两个二进制。远端平台是否通过及产物是否可用以对应 Actions 运行结果为准。
+- `.github/workflows/ci.yml`：GitHub Actions 在 push/pull_request 时使用 stable Rust，分别在 `ubuntu-latest`（x64）、`macos-latest`（arm64）、`macos-15-intel`（x64）和 `windows-latest`（x64）执行 test、clippy、fmt，再构建 Release。四个 job 执行相同检查，包括 Intel Mac 上的原生测试。产物命名为 `timeline-${{ matrix.os }}`，只包含对应 runner 的 `tl`/`tl-mcp`（Windows 为 `.exe`）。
+- CI 二进制需要匹配使用者的系统及 CPU 架构；Intel Mac 包不是通用 macOS 包，也不保证所有旧版 macOS 都兼容。`macos-15-intel` 的可用期受 GitHub 镜像弃用安排约束，不能作为永久分发渠道；平台选择及官方公告见 [环境说明](docs/environments.md)，实际测试结果见 [验收记录](docs/ACCEPTANCE.md)。
 - 数据格式保持 v1，MCP 工具集版本保持 1.1.0；新元数据缺失按规格补齐，损坏的 prefix_tokens/stale 丢弃后重建；parent/children/message/branches 等源数据损坏拒绝读取及覆盖。
 - 归档把独有无 pin 原文从 nodes 搬到 archive；摘要留热，允许其 parent 指向冷区，不改写 parent/children/message。核心节点、路径、context、tokens 及索引重建读取两区；fork 必须以热节点为起点，显式冷区恢复预留给 v1.2。
 - 预算不可行错误的消息为 budget infeasible，数据为最低布局总成本 required_tokens 和输入 max_tokens；CLI 在 error/data 返回，MCP 在 JSON-RPC error.message/data 返回。失败不提交任何变更。
 - 派生状态包括 prefix_tokens、covers、真实摘要语义覆盖、占位复用、真实摘要区间、摘要参数索引、版本后继、依赖反向关系、水位路径和 stale；refcount 按查询计算。完整清单见 [README](README.md)。
-- 新建快照、备份、锁在 Windows 使用创建时受保护 DACL `D:P(A;;FA;;;OW)`，已实测；Unix 为 0600，本次未执行。Windows 通过 tempfile 的 MoveFileExW 覆盖，Unix 通过 rename 并同步父目录，不先删除目标。
+- 新建快照、备份、锁在 Windows 使用创建时受保护 DACL `D:P(A;;FA;;;OW)`，Linux/macOS 使用 `0600`；权限回归在对应平台条件编译并由 CI 执行，已确认的运行证据见 [验收记录](docs/ACCEPTANCE.md)。Windows 通过 tempfile 的 MoveFileExW 覆盖，Linux/macOS 通过 rename 并同步父目录，不先删除目标。
 - 应用只读取 TIMELINE_DB/USERPROFILE/HOME，不自动加载 `.env`；无外部服务、网络访问或监听端口。环境权威清单见 [docs/environments.md](docs/environments.md)。
 - [TIMELINE-SPEC.md](TIMELINE-SPEC.md) v1.1.2 是构建权威；已解决的预算与归档冲突，以及不可变回填、unpin、占位和水位边界解释见 [docs/SPEC-NOTES.md](docs/SPEC-NOTES.md)。未启用增量日志；水位优化的两个参数值目前执行相同全路径扫描。
 

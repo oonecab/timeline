@@ -7,10 +7,11 @@
 > `format_version` 保持 1。变更明细见 §14。
 > 本文档是 Timeline 项目的**唯一权威构建规格**。实现者（Claude Code / Codex / 人类）
 > 按此文档从零实现，应得到行为一致的系统。
-> 已有 Rust 参考实现（`~/workspace/dsaa/timeline/`，7 个测试全过）。
+> 早期 Rust 参考实现位于设计者的 `~/workspace/dsaa/timeline/`，当时通过 7 个测试。
+> 这是历史来源，不是安装路径；当前仓库的跨平台安装、CI 和验收结果见 [README](README.md) 与 [验收记录](docs/ACCEPTANCE.md)。
 > **如本文档与参考实现有冲突，以本文档为准**（文档吸收了实现中发现的精化，
 > 例如预算预留、占位复用规则、pin 重复计数的修正）。
-> 早期的设计草稿 `~/workspace/dsaa/timeline-adt.md` 保留为设计缘起，不再作为构建依据。
+> 早期草稿 `~/workspace/dsaa/timeline-adt.md` 同样是历史资料，不再作为构建依据。
 
 ---
 
@@ -67,7 +68,7 @@
 **依赖规则**：上层依赖下层，下层不知道上层的存在。
 Core ADT 必须是可单元测试的纯逻辑——第 9 节的验收测试全部针对 Layer 0（+ Storage  round-trip）。
 
-**推荐实现语言**：Rust（与参考实现一致：内存安全、单二进制分发）。
+**推荐实现语言**：Rust（与参考实现一致：内存安全，可按平台分发独立可执行文件；CLI 与 MCP 服务各一个）。
 规格本身语言无关；用其他语言实现必须逐条满足操作契约与公理。
 
 **推荐目录布局**：
@@ -526,7 +527,7 @@ tl archive-branch --name 旧分支
 | pin 优先于预算 | 重要记忆的语义优先于数字预算；上界保证为此让路并显式声明 |
 | 摘要只增、原文永删不掉 | 可逆遗忘；对抗摘要污染（prompt 注入驻留）的审计/回滚基础 |
 | MCP 而非各家原生插件 | ADT 与 harness 无关；Claude Code / Codex / Cursor / dsh 都能用；dsh 尚处 preview，API 不稳定 |
-| Rust 实现 | 内存安全、单二进制分发；规格本身语言无关 |
+| Rust 实现 | 内存安全，可按平台分发 CLI 与 MCP 两个独立可执行文件；规格本身语言无关 |
 | 上下文水位线（v1.1） | Dataflow 的 watermark 思想：单调的"完整性度量"；预算扫描只走水位之后；由 summarize 自动推进，不新增工具 |
 | 预算优先级分层（v1.1） | QwenGyre 的 role priority：被摘要覆盖的节点是语义枢纽，优先于纯时间贪心；去重按集合计（防未来多路径扩展） |
 | 归档三条件（v1.1） | IBM Streams Beam runner 的 keyed GC：水位 / 无 pin / 无未回填摘要依赖；引用计数归零才可动；归档≠删除 |

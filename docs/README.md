@@ -16,12 +16,16 @@
 
 ## 项目文档
 
-在此添加产品、设计、API、运维、业务规则和用户文档链接。
+初次使用建议先看 README，按 Windows、Linux 或 Mac 架构找到对应的下载与 CLI/MCP 配置说明。需要修改代码时，再阅读技术说明、构建规格与测试记录。
 
-- [README](../README.md)：构建、CLI/MCP、token 与预算、存储和恢复说明。
-- [TIMELINE-SPEC.md](../TIMELINE-SPEC.md)：权威构建规格、§9 测试映射与 §13 验收清单。
-- [SPEC-NOTES.md](SPEC-NOTES.md)：v1.1.1/v1.1.2 已解决的历史冲突、当前边界解释与回归设计。
-- [ACCEPTANCE.md](ACCEPTANCE.md)：最新 §13 逐项结果、测试分组与实际执行证据。
-- [TECH.md](../TECH.md)：技术事实、模块边界、兼容性与技术栈变更索引。
-- [environments.md](environments.md)：非秘密变量、路径优先级及运行环境。
-- [tests](../tests) 与 [acceptance.py](../scripts/acceptance.py)：可执行验收；运行日志位于 target/acceptance，最终结果由交付统一记录。
+| 想了解的内容 | 文档 |
+|---|---|
+| 下载与启动、CLI/MCP 配置、预算、存储与恢复 | [README](../README.md) |
+| 各系统的路径与环境变量、执行权限、CI 平台兼容范围 | [运行环境](environments.md) |
+| 架构、模块、依赖及技术栈变更 | [TECH.md](../TECH.md) |
+| 数据模型、操作契约、§9 测试映射与 §13 验收清单 | [TIMELINE-SPEC.md](../TIMELINE-SPEC.md) |
+| v1.1.1/v1.1.2 修复的历史冲突、实现边界与回归设计 | [SPEC-NOTES.md](SPEC-NOTES.md) |
+| Windows 本地历史验收、持续 CI 与各平台的执行证据 | [ACCEPTANCE.md](ACCEPTANCE.md) |
+| Agent 如何在仓库中协作 | [AGENTS.md](../AGENTS.md) |
+
+[tests](../tests) 保存可执行回归，[acceptance.py](../scripts/acceptance.py) 可一次运行本地格式、静态检查、测试和 Release 构建，日志写入 `target/acceptance/`。远端检查由 [CI 工作流](../.github/workflows/ci.yml) 执行，结果和二进制产物保存在 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml) 的对应运行中。

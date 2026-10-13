@@ -8,7 +8,7 @@
   },
   "technology": {
     "languages": [
-      "Rust 2024 edition（Cargo 声明 rust-version 1.85；当前验证工具链 1.97.1）"
+      "Rust 2024 edition（Cargo 声明 rust-version 1.85；Windows 本地验收工具链 1.97.1，CI 使用 stable）"
     ],
     "frameworks": [
       "serde 1 / serde_json 1：JSON 数据模型与协议",
@@ -18,7 +18,7 @@
       "windows-sys 0.61：Windows 创建时的私有 DACL"
     ],
     "runtimes": [
-      "Rust / Cargo；运行时为本机原生二进制，无外部服务"
+      "使用 Rust / Cargo 构建；发布产物是本机原生二进制，运行时无需 Rust 或外部服务。"
     ],
     "source_directories": [
       "src",
