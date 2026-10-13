@@ -23,3 +23,23 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: fmt
         run: cargo fmt --check
+      - name: build release binaries
+        run: cargo build --release --locked
+      - name: upload Windows binaries
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: timeline-${{ matrix.os }}
+          path: |
+            target/release/tl.exe
+            target/release/tl-mcp.exe
+          if-no-files-found: error
+      - name: upload Linux and macOS binaries
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: timeline-${{ matrix.os }}
+          path: |
+            target/release/tl
+            target/release/tl-mcp
+          if-no-files-found: error

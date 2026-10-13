@@ -8,7 +8,7 @@
 
 ## 构建与验收
 
-需要 Rust/Cargo 及对应的本机链接工具链。Cargo 声明 Rust 1.85、edition 2024；本次实际验证为 Windows 上的 Rust/Cargo 1.97.1，未单独验证最低版本或 Unix 平台。
+从源码构建需要 Rust/Cargo 及对应的本机链接工具链；也可下载下述 CI 二进制，无需安装 Rust。Cargo 声明 Rust 1.85、edition 2024；本地验收环境为 Windows 上的 Rust/Cargo 1.97.1，未单独验证最低版本；跨平台结果以对应 CI 运行为准。
 
 ```sh
 cargo fetch --locked
@@ -22,7 +22,29 @@ cargo build --release --locked
 
 最新检查结果、测试分组及平台范围见 [§13 逐项验收记录](docs/ACCEPTANCE.md)，其中也声明尚未启用的可选优化。
 
-[GitHub Actions CI](.github/workflows/ci.yml) 在 push 和 pull_request 时，使用 stable Rust 在 Ubuntu、macOS、Windows 上分别执行测试、Clippy 严格检查和格式检查。各次远端检查的实际结果见 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml)。
+[GitHub Actions CI](.github/workflows/ci.yml) 在 push 和 pull_request 时，使用 stable Rust 在 Ubuntu、macOS、Windows 上分别执行测试、Clippy 严格检查和格式检查，随后构建并上传 Release 二进制。各次远端检查的实际结果见 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml)。
+
+### 下载二进制，无需编译
+
+在 [Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml) 打开所需提交的成功运行，在 **Artifacts** 下载对应平台的 ZIP，解压即可取得两个二进制：
+
+| Artifact | ZIP 内的文件 |
+|---|---|
+| `timeline-windows-latest` | `tl.exe`、`tl-mcp.exe` |
+| `timeline-ubuntu-latest` | `tl`、`tl-mcp` |
+| `timeline-macos-latest` | `tl`、`tl-mcp` |
+
+这些包按 [GitHub runner](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) 的原生目标构建：当前 Windows/Linux 为 x64，macOS 为 arm64。目标机器须匹配 CPU 架构并使用兼容的系统版本；`-latest` 会更新，以该次运行的 runner 信息为准。
+
+Windows 解压后可直接运行。Linux/macOS 的 artifact [不保留执行权限](https://github.com/actions/upload-artifact/blob/v4/README.md#permission-loss)，解压后先在所在目录运行：
+
+```sh
+chmod +x tl tl-mcp
+```
+
+然后按 [MCP stdio 接入](#mcp-stdio-接入) 将 `command` 设置为解压后 `tl-mcp`（Windows 为 `tl-mcp.exe`）的绝对路径，并指定数据库路径。使用这些二进制不需要 Rust/Cargo。
+
+### 本地构建产物
 
 构建产物为 `target/release/tl`、`target/release/tl-mcp`，Windows 带 `.exe`。将产物加入 PATH，或直接通过 Cargo 运行：
 

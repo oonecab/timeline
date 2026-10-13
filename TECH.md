@@ -60,7 +60,7 @@
 - `src/storage.rs`：路径、稳定 sidecar 文件锁、事务、Unix 秒时间、7 天幂等结果、全量原子快照及上一版本 `.bak`。持久化计数器载入 Database 后由核心在事务内分配；核心不读取时钟或产生随机 ID。
 - `src/service.rs`：14 项工具的参数校验与分发；`src/bin/tl.rs`、`src/bin/tl-mcp.rs` 分别提供 CLI 与逐行 stdio JSON-RPC。
 - `tests/`：公理与随机场景、CLI/MCP 全流程、损坏/旧格式、幂等、并发及平台权限；存储回归仅操作临时目录。`scripts/acceptance.py` 一键执行已登记检查，日志写入 `target/acceptance/`。
-- `.github/workflows/ci.yml`：GitHub Actions 在 push/pull_request 时使用 stable Rust 和 rustfmt/clippy，按 Ubuntu、macOS、Windows 矩阵执行 test、clippy、fmt；远端平台是否通过以对应 Actions 运行结果为准。
+- `.github/workflows/ci.yml`：GitHub Actions 在 push/pull_request 时使用 stable Rust 和 rustfmt/clippy，按 Ubuntu、macOS、Windows 矩阵执行 test、clippy、fmt，随后构建 Release 并以 `timeline-${{ matrix.os }}` 上传 `tl`/`tl-mcp`（Windows 为 `.exe`）；仅包含对应 runner 原生平台的两个二进制。远端平台是否通过及产物是否可用以对应 Actions 运行结果为准。
 - 数据格式保持 v1，MCP 工具集版本保持 1.1.0；新元数据缺失按规格补齐，损坏的 prefix_tokens/stale 丢弃后重建；parent/children/message/branches 等源数据损坏拒绝读取及覆盖。
 - 归档把独有无 pin 原文从 nodes 搬到 archive；摘要留热，允许其 parent 指向冷区，不改写 parent/children/message。核心节点、路径、context、tokens 及索引重建读取两区；fork 必须以热节点为起点，显式冷区恢复预留给 v1.2。
 - 预算不可行错误的消息为 budget infeasible，数据为最低布局总成本 required_tokens 和输入 max_tokens；CLI 在 error/data 返回，MCP 在 JSON-RPC error.message/data 返回。失败不提交任何变更。
