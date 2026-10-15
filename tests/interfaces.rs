@@ -282,7 +282,7 @@ fn mcp_initialize_all_fourteen_tools_and_errors() {
     let initialize = mcp.request("initialize", json!({"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"acceptance","version":"1"}}));
     assert_eq!(
         initialize["result"]["serverInfo"],
-        json!({"name":"timeline","version":"1.1.0"})
+        json!({"name":"timeline","version":env!("CARGO_PKG_VERSION")})
     );
     assert_eq!(initialize["result"]["protocolVersion"], "2024-11-05");
     writeln!(

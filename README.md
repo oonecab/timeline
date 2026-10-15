@@ -83,7 +83,7 @@ cargo run --bin tl-mcp -- --db demo.timeline.json
 
 数据库路径优先级为 **`--db PATH` > 非空 `TIMELINE_DB` > 用户目录中的 `.timeline.json`**。Windows 用户目录取 `USERPROFILE`，缺失时回退 `HOME`；Unix 取 `HOME`。父目录必须已存在。应用不自动加载 `.env`，详见 [环境说明](docs/environments.md)。
 
-所有 CLI 命令均可附带全局参数 `--db PATH`、`--timeline TL`、`--idempotency-key KEY`。省略 timeline 时选择 ID 数字最小、最早创建的 timeline；create 不需要已有 timeline。成功向 stdout 输出 JSON、退出码为 0；错误向 stderr 输出 `{"error":"原因"}`、退出码非零，预算不可行错误另含 `data`（见下文）。`--help`/`--version` 为文本帮助。
+CLI 支持全局参数 `--db PATH`、`--timeline TL`、`--idempotency-key KEY`；只读导出 `export` 不接受幂等键。省略 timeline 时选择 ID 数字最小、最早创建的 timeline；create 不需要已有 timeline。成功向 stdout 输出 JSON、退出码为 0；`export --format ascii` 省略 `--output` 时直接输出文本图。错误向 stderr 输出 `{"error":"原因"}`、退出码非零，预算不可行错误另含 `data`（见下文）。`--help`/`--version` 为文本帮助。
 
 下面的示例假设 `tl` 已在 PATH 中。若仍从解压目录运行，Windows 将 `tl` 换为 `.\tl.exe`，Linux/macOS 换为 `./tl`。方括号表示可选参数，节点和时间线 ID 用实际返回值替换。
 
@@ -103,6 +103,8 @@ cargo run --bin tl-mcp -- --db demo.timeline.json
 | `node --node n1` | `timeline_node` | 节点详情，role/text/tokens 为顶层字段 |
 | `archive-check --name 分支` | `timeline_archive_check` | `eligible,reasons` |
 | `archive-branch --name 分支` | `timeline_archive_branch` | `{"archived":["n2","n3"]}`，仅列本次实际搬运的节点 |
+| `export --format drawio --output task.drawio` | 无，仅 CLI | `format,timeline_id,output,nodes,edges` |
+| `export --format ascii [--output task.txt]` | 无，仅 CLI | 省略 output 时为文本图；保存文件时为上述 JSON |
 
 MCP 除 create 外均须显式传 timeline_id；CLI `--max` 对应 `max_tokens`，`--derived-from` 对应字符串数组 `derived_from`，归档 `--name` 对应 `branch`。完整参数 schema 由 tools/list 返回。
 
@@ -120,6 +122,38 @@ tl --db demo.timeline.json append --role user --text "细化验收" --tokens 6
 tl --db demo.timeline.json context --node n3
 tl --db demo.timeline.json branches
 ```
+
+## 导出可编辑的节点图
+
+```sh
+tl --db demo.timeline.json --timeline tl0 export --format drawio --output task.drawio
+```
+
+用 draw.io 打开生成的 `.drawio` 文件，即可拖动节点、调整连线、修改图中文字和另存文件。图采用从左到右的圆角节点布局，当前 head 为绿色，普通消息为浅蓝色；摘要、pin 与归档节点有单独标记。完整原文保存在节点数据的 `text_json` 属性中。
+
+导出包含所选时间线的全部冷热节点，是独立的历史快照；不改写数据库，不启动网页服务，不增加 MCP 工具，修改图文件也不会回写 Timeline。已有输出文件会报错，请换一个文件名保留手工调整。摘要覆盖、版本与依赖在默认隐藏的独立图层中，可在 draw.io 的图层面板开启。
+
+完整规则、打开方式和测试范围见 [draw.io 导出说明](docs/drawio.md)；可以先打开 [合成示例](examples/timeline.drawio) 查看样式。
+
+## 在 Bash / PowerShell 中查看节点图
+
+```sh
+tl --db demo.timeline.json --timeline tl0 export --format ascii
+tl --db demo.timeline.json --timeline tl0 export --format ascii --output task.txt
+```
+
+第一条直接在终端打印分支树；第二条保存 UTF-8 文本文件并输出 JSON 结果。连线使用 `|`、`+--`、`` `-- ``，消息保留中文，连续历史不会逐层缩进；当前分支、pin、归档、摘要版本与覆盖关系均有标记。示例：
+
+```text
+[n1 user PIN] "只使用本地数据"
+|
++-- [n2 assistant] "方案 A"
+|   |
+|   [n3 assistant] "验证结果" [HEAD* "main"]
+`-- [n4 assistant] "方案 B" [HEAD "alternative"]
+```
+
+ASCII 输出是面向人的预览，消息和分支名超过 64 个 Unicode 标量时用 `...` 标记省略；完整原文仍可通过 `tl node --node ID` 查询。支持管道和分页器，原有命令的 JSON 输出保持不变。Bash、PowerShell 的命令示例、文本编码和输出约定见 [终端图说明](docs/ascii.md)。
 
 ## Token、预算、水位与版本
 
@@ -250,7 +284,7 @@ macOS（Apple Silicon 和 Intel 配置形式相同，使用各自的包）：
 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"timeline_append","arguments":{"timeline_id":"tl0","role":"user","text":"你好","idempotency_key":"message-001"}}}
 ```
 
-支持 ping。初始化报告服务名 timeline、版本 1.1.0；支持协商 2024-11-05、2025-03-26、2025-06-18、2025-11-25，未知版本返回 2025-11-25 供客户端决定是否继续，不承诺未来协议功能。旧两个版本支持 batch 串行处理；2025-06-18 及以后只接受单请求。遵循 [MCP 生命周期](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)、[stdio 传输](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)与[旧版基础协议](https://modelcontextprotocol.io/specification/2025-03-26/basic)。
+支持 ping。初始化报告服务名 timeline，服务版本与 `Cargo.toml` 的包版本一致，当前为 1.1.1；支持协商 2024-11-05、2025-03-26、2025-06-18、2025-11-25，未知版本返回 2025-11-25 供客户端决定是否继续，不承诺未来协议功能。旧两个版本支持 batch 串行处理；2025-06-18 及以后只接受单请求。遵循 [MCP 生命周期](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)、[stdio 传输](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)与[旧版基础协议](https://modelcontextprotocol.io/specification/2025-03-26/basic)。
 
 所有版本的成功结果均在 `result.content[0].text` 中保存工具 JSON 字符串；2025-06-18 及以后的对象结果同时返回 structuredContent。幂等键可在 arguments 或 params 中，两处同时提供须一致。领域错误 code=-32000，协议错误使用对应标准错误码；通知不回应也不执行变更工具。预算不可行返回 `error` 对象 `{"code":-32000,"message":"budget infeasible","data":{"required_tokens":65,"max_tokens":1}}`（此数值对应上文反例）。
 

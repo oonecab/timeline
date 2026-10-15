@@ -8,7 +8,7 @@ use timeline::storage::{Storage, resolve_db_path};
 #[derive(Parser)]
 #[command(
     name = "tl-mcp",
-    version = "1.1.0",
+    version = env!("CARGO_PKG_VERSION"),
     about = "Timeline MCP server over newline-delimited stdio JSON-RPC"
 )]
 struct Cli {
@@ -80,7 +80,7 @@ fn handle(
                 .copied()
                 .find(|version| *version == requested)
                 .unwrap_or("2025-11-25");
-            json!({"protocolVersion":*protocol_version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"timeline","version":"1.1.0"}})
+            json!({"protocolVersion":*protocol_version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"timeline","version":env!("CARGO_PKG_VERSION")}})
         }
         "ping" | "notifications/initialized" => json!({}),
         "tools/list" => json!({"tools":tool_definitions()}),

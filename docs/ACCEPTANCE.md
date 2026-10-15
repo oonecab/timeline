@@ -100,3 +100,57 @@ python3 scripts/acceptance.py
 本地还检查了 YAML 中的 tag 触发、四平台矩阵、发布依赖与权限、四个完整资产路径，并确认 Release 与现有 CI 的检查和构建步骤一致。执行了工作流中的 Windows 打包命令，确认 ZIP 根目录只有 `tl.exe`、`tl-mcp.exe`，解压后两者的 `--help` 均成功；Unix 打包命令通过 Bash 语法检查。未创建 tag，因此没有执行远端 Release 发布；Linux/macOS 的本次打包和上传仍需实际 tag 运行验证。actionlint 未能运行：本机未安装，下载工具时 GitHub TLS 连接失败；以上 YAML 结构及 shell 检查是本次替代验证。
 
 下载与发布说明已同步到 README、环境说明、文档索引和 [发布指南](releases.md)，技术事实已同步到 TECH。此次仅增加 GitHub Actions 发布流程，未改变应用依赖、运行时环境变量、数据库格式或业务规则，因此无需更新应用环境清单及业务规则测试。
+
+## draw.io 导出验收：2026-10-15
+
+在 Windows 本地执行 `python scripts/acceptance.py`，**85 个测试通过，0 失败、0 忽略**，其中新增 `tests/drawio.rs` 的 11 项回归。此前 74 项核心、存储与 CLI/MCP 测试全部继续通过。当前运行日志及机器可读结果在 `target/acceptance/commands.log` 和 `target/acceptance/results.json`。
+
+| 命令 | 退出码 | 本次耗时 |
+|---|---:|---:|
+| `cargo fmt --all -- --check` | 0 | 0.153s |
+| `cargo clippy --all-targets --locked -- -D warnings` | 0 | 0.251s |
+| `cargo test --all-targets --locked` | 0 | 17.436s |
+| `cargo build --release --bins --locked` | 0 | 3.489s |
+
+另外执行了治理清单中的 `cargo fetch --locked` 和 `cargo build --release --locked`，退出码均为 0。
+
+| 导出验收项 | 结果与证据 |
+|---|---|
+| 原生节点、连线和完整数据 | **通过**。独立 XML 解析器校验节点 ID 唯一、父子边准确、关系目标存在、完整原文与摘要版本数据可恢复；共享前缀只出现一次。 |
+| 截图风格的横向布局 | **通过**。当前路径水平排列，分支分行，节点不重叠；使用浅蓝圆角节点、绿色当前 head 和灰色折线箭头。同一状态的输出确定，不受 HashMap 迭代顺序影响。 |
+| 冷热历史、摘要与占位 | **通过**。归档原文和热摘要全部导出，跨冷热父子关系保留；摘要覆盖、版本替代、依赖分别标注且放入独立图层；不创建或回填占位。 |
+| 文本与长历史边界 | **通过**。中文、emoji、HTML 字面量、引号、控制字符和 XML 非法字符可安全输出；长消息完整保留，展示预览有限；6000 条消息的线性历史导出通过。 |
+| 文件只读与手工修改 | **通过**。真实 CLI 进程验证导出前后数据库和备份逐字节不变；修改图文件后，查询得到的原始消息不变。已有输出文件拒绝覆盖，保留人工修改。 |
+| 参数、错误和并发 | **通过**。验证默认最早时间线、显式选择、环境变量、缺失时间线、损坏数据库、不支持的格式、无效输出目录、拒绝幂等键，以及两个进程竞争同一输出时仅一个成功。 |
+| 官方图形渲染与编辑保存 | **通过**。使用 draw.io 官方 `viewer-static.min.js` 中的 Graph / mxCodec，在无网络访问的本地 Chromium 页面解码实际 CLI 文件；8 个节点与 9 条边正常载入，节点可移动、可编辑。移动节点、修改标题后重新编码并解码，位置、标题和完整原文元数据均保留；开启摘要关联图层后连线可见，页面无 JavaScript 错误。 |
+
+官方渲染检查使用合成对话，示例保存在 [examples/timeline.drawio](../examples/timeline.drawio)。本地截图及修改后的 XML 在未提交的 `target/drawio-smoke/`；官方脚本仅用于本次验证，不随应用发布，也没有引入网页服务。这项检查覆盖官方渲染和文件编解码，没有声称执行完整 draw.io 桌面应用的人工操作。Unix 专用的符号链接目标保护测试未在本机运行，需由 Linux/macOS CI 验证；上方历史 CI 结果不代表此次导出变更已通过远端 CI。
+
+文档影响：新增 [导出说明](drawio.md)，同步 README、文档索引、TECH 与治理清单中的架构事实，并提供可打开的合成示例。`roxmltree` 仅用于测试；运行时依赖、存储实现与格式、14 个 MCP 工具、环境变量和端口均保持不变，因此无需修改构建规格、存储规则、环境清单或新增 ADR。
+
+## ASCII 终端图验收：2026-10-15
+
+增加 `export --format ascii` 后，本地重新执行 `python scripts/acceptance.py`，**94 个测试通过，0 失败、0 忽略**。其中新增 `tests/ascii.rs` 的 9 项回归，原有 11 项 draw.io 测试与 74 项核心、存储及接口测试全部通过。`cargo fmt --all -- --check`、`cargo clippy --all-targets --locked -- -D warnings`、`cargo test --all-targets --locked`、`cargo build --release --bins --locked` 退出码均为 0；完整日志和实际耗时保存在 `target/acceptance/`。治理清单中的 `cargo fetch --locked` 与 `cargo build --release --locked` 也执行成功。
+
+| 验收项 | 结果与证据 |
+|---|---|
+| 终端分支结构 | **通过**。逐字比对分叉图，校验共享前缀仅出现一次、当前路径优先、多分支 head 同节点显示与 HashMap 顺序无关。空时间线和 6000 条消息的长链通过，连续历史不增加缩进。 |
+| 冷热、摘要与只读性 | **通过**。完整列出冷热节点、版本替代、覆盖区间、依赖、STALE 和占位；ASCII 与 draw.io 的节点及关联计数相同。渲染前后数据库对象不变，不填充占位。 |
+| 文本与控制字符 | **通过**。保留中文与 emoji，限制展示预览，转义换行、回车、制表符、终端控制序列及方向控制符；原文保持不变。 |
+| stdout 与文件契约 | **通过**。stdout 直接输出文本图，`--output` 保存相同 UTF-8 内容并返回 JSON；拒绝覆盖手改文件、拒绝以数据库为输出，数据库和备份逐字节不变。错误只写 stderr JSON，draw.io 的默认格式及必填输出路径保持不变。 |
+| 管道提前关闭 | **通过**。实际 CLI 子进程的 stdout 读取端被关闭时正常退出，无 panic 或额外 stderr。 |
+| PowerShell 5.1 / 7 | **通过**。在 Windows PowerShell `5.1.26100.7920` 和 PowerShell `7.6.6` 中调用 Release 二进制，显式使用 UTF-8 解码，验证中文 stdout 与 `--output` 文件一致、`Select-Object -First 5` 管道有效、源文件 SHA256 不变。 |
+| Git Bash | **通过**。Git Bash `5.3.15` 调用 Windows Release 二进制，验证 stdout 重定向、`head -n 5` 管道，以及输出字节与 PowerShell 文件导出一致。此项不代表已运行 Linux/macOS 原生二进制。 |
+| draw.io 兼容 | **通过**。提取共用只读拓扑后重新导出相同合成数据，XML 与上次 [draw.io 示例](../examples/timeline.drawio) 的 SHA256 相同。 |
+
+shell 验证脚本、结果与文件位于未提交的 `target/ascii-smoke/`。可直接查看 [ASCII 合成示例](../examples/timeline.ascii.txt)。本次没有运行远端 CI，上方历史跨平台记录不作为本次变更的执行证据。
+
+文档影响：新增 [终端图说明](ascii.md)，更新 README、文档索引、draw.io 格式选项说明、TECH 与治理清单，明确只有 ASCII 无输出路径时直接打印文本。没有新增依赖，没有修改存储实现、MCP、业务规则、环境变量或端口，因此无需修改规格、环境清单或新增 ADR。
+
+## v1.1.1 发布前验收：2026-10-15
+
+将 draw.io / ASCII 导出纳入此次发布，并把 Cargo 包版本升为 `1.1.1`。两个程序的 `--version` 和 MCP `serverInfo.version` 统一读取 Cargo 包版本；MCP 工具集契约与数据库格式保持不变。版本行为已同步到 README、TECH 和发布指南。
+
+重新执行治理清单登记的 `cargo fetch --locked`、格式检查、Clippy、全目标测试及 Release 构建，五项退出码均为 0；**94 个测试通过，0 失败、0 忽略**。实测 `tl --version` 为 `tl 1.1.1`、`tl-mcp --version` 为 `tl-mcp 1.1.1`，使用独立临时数据库路径的 MCP 初始化返回服务版本 `1.1.1`。该初始化未创建数据库文件。
+
+本地证据保存在未提交的 `target/prepush-v1.1.1-validation/`。上述记录为发布前的 Windows 本地结果；tag 推送后的四平台检查、打包及发布结果以 [Release Actions](https://github.com/oonecab/timeline/actions/workflows/release.yml) 为准。

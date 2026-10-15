@@ -21,6 +21,8 @@
 | 想了解的内容 | 文档 |
 |---|---|
 | 下载与启动、CLI/MCP 配置、预算、存储与恢复 | [README](../README.md) |
+| 导出可手动编辑的横向节点图、图层含义与只读边界 | [draw.io 导出](drawio.md) |
+| 在 Bash / PowerShell 查看 ASCII 分支树、管道与文本文件输出 | [终端图](ascii.md) |
 | 用 tag 发布四平台二进制、发布权限与重跑规则 | [发布指南](releases.md) |
 | 各系统的路径与环境变量、执行权限、CI 平台兼容范围 | [运行环境](environments.md) |
 | 架构、模块、依赖及技术栈变更 | [TECH.md](../TECH.md) |

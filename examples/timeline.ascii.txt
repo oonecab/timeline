@@ -1,0 +1,18 @@
+Timeline tl0 | current="main"
+History: parent links | HEAD*: current branch | COLD: archived
+Summary links are annotations, not merges.
+
+[n0 root]
+|
+[n1 user] "实现本地检索功能"
+|
+[n2 user PIN] "只使用本地数据，不发送到外部服务"
+|
++-- [n3 assistant] "方案 A：内存索引"
+|   |
+|   [n4 assistant] "样本文档检索结果已记录；大数据量性能仍待验证。" [HEAD* "main"]
++-- [n5 assistant] "方案 B：直接扫描文件"
+|   |
+|   [n6 assistant] "结果保留在独立分支" [HEAD "替代路线"]
+`-- [n7 summary v1] "结论：使用内存索引。依据：样本检索结果。未决：大数据量性能。"
+      covers=n3..n4

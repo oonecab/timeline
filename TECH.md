@@ -38,6 +38,7 @@
 - 纯内存 Core → JSON Storage → CLI / stdio MCP；Core 无 I/O、时钟或随机数。
 - 单 JSON 文件 format_version=1；稳定 sidecar 文件锁串行化事务；临时快照 fsync 后原子替换并保留 .bak。
 - MCP 提供 14 个工具，按行处理 stdio JSON-RPC；应用运行期间不访问网络、不监听端口。
+- CLI 额外提供只读 `drawio` / `ascii` 导出；生成可编辑的横向节点图或终端分支树，独立保存或输出文本，不回写数据库，不新增 MCP 工具或网页服务。
 - 源数据持久化，派生字段和索引读取时重建；每次成功变更全量 checkpoint，未启用可选增量日志或水位扫描优化。
 - 构建依据为 TIMELINE-SPEC v1.1.2；归档将独有原文搬入同文件冷区，摘要保留在热区，原文及 parent/children 不变；只读查询跨冷热区。预算不可行返回 budget infeasible 与 required_tokens/max_tokens；历史修正与边界解释见 docs/SPEC-NOTES.md。
 
@@ -59,6 +60,11 @@
 - `src/lib.rs`：纯 ADT、全局确定性计数器、操作契约、源结构验证与派生索引重建；Timeline.nodes/branches 为 HashMap，Database.timelines 为 BTreeMap。CLI 默认 timeline 按 ID 数字选最早创建者。
 - `src/storage.rs`：路径、稳定 sidecar 文件锁、事务、Unix 秒时间、7 天幂等结果、全量原子快照及上一版本 `.bak`。持久化计数器载入 Database 后由核心在事务内分配；核心不读取时钟或产生随机 ID。
 - `src/service.rs`：14 项工具的参数校验与分发；`src/bin/tl.rs`、`src/bin/tl-mcp.rs` 分别提供 CLI 与逐行 stdio JSON-RPC。
+- 当前应用版本为 `1.1.1`；两个二进制的 `--version` 与 MCP `serverInfo.version` 均读取 Cargo 包版本。此版本新增只读导出，MCP 工具集契约仍为 1.1.0，数据库格式仍为 v1。
+- `src/drawio.rs`：纯只读图投影，将所选 Timeline 全部冷热节点转成未压缩 draw.io XML；使用稳定的迭代树布局，当前路径优先，父子关系与摘要关联分层。CLI 通过现有 `Storage::read` 读取，用已有 tempfile 写独立文件并拒绝覆盖。格式、展示与输出契约见 [导出说明](docs/drawio.md)。
+- `src/export_graph.rs`：两个导出器共用的只读拓扑校验、冷热合并、稳定排序和当前路径优先遍历；不属于存储层或 MCP 接口。`src/ascii.rs` 用 ASCII 连线和 UTF-8 预览生成终端分支树，连续历史保持同一列。仅 ASCII 不传输出路径时向 stdout 打印文本，保存文件时沿用拒绝覆盖与 JSON 结果；stdout 管道提前关闭时正常退出。详细契约见 [终端图说明](docs/ascii.md)。
+- `tests/drawio.rs`：导出回归；`roxmltree 0.21` 仅为 dev-dependency，用独立 XML 解析器校验导出文件，不进入发布二进制。未新增运行时核心依赖，存储格式、MCP 接口和环境变量不变。
+- `tests/ascii.rs`：终端图的布局、冷热与版本语义、控制字符转义、长链、stdout/文件一致性、只读性和断管道回归；ASCII 导出没有新增依赖。
 - `tests/`：公理与随机场景、CLI/MCP 全流程、损坏/旧格式、幂等、并发及平台权限；存储回归仅操作临时目录。`scripts/acceptance.py` 一键执行已登记检查，日志写入 `target/acceptance/`。
 - `.github/workflows/ci.yml`：GitHub Actions 在 push/pull_request 时使用 stable Rust，分别在 `ubuntu-latest`（x64）、`macos-latest`（arm64）、`macos-15-intel`（x64）和 `windows-latest`（x64）执行 test、clippy、fmt，再构建 Release。四个 job 执行相同检查，包括 Intel Mac 上的原生测试。产物命名为 `timeline-${{ matrix.os }}`，只包含对应 runner 的 `tl`/`tl-mcp`（Windows 为 `.exe`）。
 - `.github/workflows/release.yml`：推送任意 tag 时，在上述四个平台重新执行相同检查与构建；四个平台全部成功后，由独立 job 发布该 tag 的 GitHub Release。Windows 包为 ZIP，Linux/macOS 包为保留执行权限的 tar.gz，每包根目录仅含两个二进制。构建 job 只有 `contents: read`，发布 job 通过 GitHub 自动提供的令牌获得 `contents: write`；未增加应用环境变量或外部运行时服务。发布步骤和下载方式见 [发布说明](docs/releases.md)。

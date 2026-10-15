@@ -4,15 +4,15 @@
 
 ## 什么时候会发布
 
-工作流监听 `push.tags: ['**']`，因此任意 tag 都会触发，包括 `release/v1.1.1` 这样带 `/` 的名称。不要求 tag 以 `v` 开头，也不会根据名称自动判断预发布版本：所有 tag 都创建普通 Release，`-beta`、`-rc` 等后缀也不例外。
+工作流监听 `push.tags: ['**']`，因此任意 tag 都会触发，包括 `release/v1.1.2` 这样带 `/` 的名称。不要求 tag 以 `v` 开头，也不会根据名称自动判断预发布版本：所有 tag 都创建普通 Release，`-beta`、`-rc` 等后缀也不例外。
 
 只在本地创建 tag 不会触发发布；把包含工作流的代码推到分支，也不会自动发布。工作流生效后的 tag 推送才触发运行，不会追溯处理远端已有 tag。tag 必须指向要发布的提交，而且该提交中应包含 `.github/workflows/release.yml`。
 
-tag 只是发布标识，不会自动修改 `Cargo.toml`，也不会自动更新程序报告的版本。如果需要调整这些版本信息，应先修改、检查并提交，再给目标提交打 tag。
+`tl --version`、`tl-mcp --version` 和 MCP 握手中的 `serverInfo.version` 都在构建时从 Cargo 包版本自动读取。tag 只是发布标识，不会修改包版本。发布前应确认 `Cargo.toml` 的包版本与 `Cargo.lock` 中 `timeline` 条目的版本一致；需要升级版本时，先同步这两个文件、完成检查并提交，再给目标提交打 tag。
 
 ## 推送一个新版本
 
-下面以 `v1.1.1` 为例，按实际版本替换。命令可以在 PowerShell、bash 或 zsh 中运行。
+下面以下一次版本 `v1.1.2` 为例，请替换为实际要发布且尚未使用的版本。命令可以在 PowerShell、bash 或 zsh 中运行。
 
 先确认工作区、目标提交和远端地址，并检查这个 tag 是否已被使用：
 
@@ -21,15 +21,15 @@ git status --short
 git log -1 --oneline
 git remote -v
 git show HEAD:.github/workflows/release.yml
-git tag --list v1.1.1
-git ls-remote --tags origin refs/tags/v1.1.1
+git tag --list v1.1.2
+git ls-remote --tags origin refs/tags/v1.1.2
 ```
 
 `git status --short` 应没有待发布的未提交改动；后两条查询应没有同名 tag 的输出。确认 `HEAD` 就是要发布的提交，本地检查已通过，再创建带说明的 tag，并只推送这一个 tag：
 
 ```sh
-git tag -a v1.1.1 HEAD -m "Release v1.1.1"
-git push origin refs/tags/v1.1.1
+git tag -a v1.1.2 HEAD -m "Release v1.1.2"
+git push origin refs/tags/v1.1.2
 ```
 
 这些命令会发布所选提交，请在版本准备好时执行。不要为了补发版本移动或覆盖旧 tag，也不要一次推送全部 tag；如果名称已使用，选一个新的版本名。
