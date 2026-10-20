@@ -33,6 +33,10 @@ enum Command {
         text: String,
         #[arg(long)]
         tokens: Option<u64>,
+        #[arg(long)]
+        intent_tag: Option<String>,
+        #[arg(long)]
+        intent_note: Option<String>,
     },
     Fork {
         #[arg(long)]
@@ -79,6 +83,10 @@ enum Command {
         derived_from: Vec<String>,
         #[arg(long)]
         supersede: Option<String>,
+        #[arg(long)]
+        intent_tag: Option<String>,
+        #[arg(long)]
+        intent_note: Option<String>,
     },
     Branches,
     Node {
@@ -188,13 +196,34 @@ fn save_export(output: &Path, contents: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn intent_value(tag: Option<String>, note: Option<String>) -> Result<Value> {
+    match (tag, note) {
+        (Some(tag), note) => {
+            let mut object = serde_json::Map::new();
+            object.insert("tag".into(), json!(tag));
+            if let Some(note) = note {
+                object.insert("note".into(), json!(note));
+            }
+            Ok(Value::Object(object))
+        }
+        (None, Some(_)) => Err(Error::new("--intent-note requires --intent-tag".into())),
+        (None, None) => Ok(Value::Null),
+    }
+}
+
 fn run(cli: Cli) -> Result<CommandOutput> {
     let storage = Storage::new(resolve_db_path(cli.db)?);
     let (tool, mut args) = match cli.command {
         Command::Create => ("timeline_create", json!({})),
-        Command::Append { role, text, tokens } => (
+        Command::Append {
+            role,
+            text,
+            tokens,
+            intent_tag,
+            intent_note,
+        } => (
             "timeline_append",
-            json!({"role":role,"text":text,"tokens":tokens}),
+            json!({"role":role,"text":text,"tokens":tokens,"intent":intent_value(intent_tag, intent_note)?}),
         ),
         Command::Fork { node, name } => ("timeline_fork", json!({"node":node,"name":name})),
         Command::Switch { name } => ("timeline_switch", json!({"name":name})),
@@ -213,9 +242,11 @@ fn run(cli: Cli) -> Result<CommandOutput> {
             tokens,
             derived_from,
             supersede,
+            intent_tag,
+            intent_note,
         } => (
             "timeline_summarize",
-            json!({"from":from,"to":to,"summary":summary,"tokens":tokens,"derived_from":derived_from,"supersede":supersede}),
+            json!({"from":from,"to":to,"summary":summary,"tokens":tokens,"derived_from":derived_from,"supersede":supersede,"intent":intent_value(intent_tag, intent_note)?}),
         ),
         Command::Branches => ("timeline_branches", json!({})),
         Command::Node { node } => ("timeline_node", json!({"node":node})),

@@ -85,6 +85,7 @@ fn message(role: &str, text: &str, tokens: Option<u64>) -> Result<Message> {
         role: role.into(),
         text: text.into(),
         tokens: tokens.unwrap_or_else(|| estimate_tokens(text)),
+        intent_tag: None,
     })
 }
 
@@ -93,11 +94,33 @@ pub struct Message {
     pub role: String,
     pub text: String,
     pub tokens: u64,
+    /// Output-only (spec §3.1): the originating node's `intent.tag`, attached
+    /// by `context` / `context_budget`. Never persisted.
+    #[serde(skip)]
+    pub intent_tag: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SummaryRange {
     pub from: String,
     pub to: String,
+}
+/// Write-time intent annotation (spec §3.2, v1.2). `tag` is a nonempty string
+/// whose vocabulary is governed by the skill layer, never enumerated here;
+/// `note` is optional free text. Immutable once the node is created.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Intent {
+    pub tag: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+fn validate_intent(intent: &Option<Intent>) -> Result<()> {
+    if let Some(intent) = intent {
+        if intent.tag.is_empty() {
+            return err("intent tag must be nonempty");
+        }
+    }
+    Ok(())
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TLNode {
@@ -117,6 +140,8 @@ pub struct TLNode {
     pub derived_from: Vec<String>,
     #[serde(default, deserialize_with = "discard_derived")]
     pub stale: bool,
+    #[serde(default)]
+    pub intent: Option<Intent>,
 }
 impl TLNode {
     fn cost(&self) -> u64 {
@@ -237,6 +262,7 @@ impl Timeline {
             supersedes: None,
             derived_from: Vec::new(),
             stale: false,
+            intent: None,
         };
         Self {
             id,
@@ -326,7 +352,13 @@ impl Timeline {
         }
         Ok(path
             .iter()
-            .filter_map(|id| self.any_node(id).expect("validated path").message.clone())
+            .filter_map(|id| {
+                let node = self.any_node(id).expect("validated path");
+                node.message.clone().map(|mut message| {
+                    message.intent_tag = node.intent.as_ref().map(|intent| intent.tag.clone());
+                    message
+                })
+            })
             .collect())
     }
     pub fn fork(&mut self, node: &str, name: &str) -> Result<()> {
@@ -542,6 +574,17 @@ impl Database {
         text: &str,
         tokens: Option<u64>,
     ) -> Result<String> {
+        self.append_with_intent(tl, role, text, tokens, None)
+    }
+    pub fn append_with_intent(
+        &mut self,
+        tl: &str,
+        role: &str,
+        text: &str,
+        tokens: Option<u64>,
+        intent: Option<Intent>,
+    ) -> Result<String> {
+        validate_intent(&intent)?;
         let msg = message(role, text, tokens)?;
         let timeline = self.timeline(tl)?;
         let head = timeline.branches[&timeline.current_branch].clone();
@@ -567,6 +610,7 @@ impl Database {
             supersedes: None,
             derived_from: Vec::new(),
             stale: false,
+            intent,
         };
         let timeline = self.timeline_mut(tl)?;
         timeline.insert_node(node);
@@ -587,8 +631,23 @@ impl Database {
         derived_from: Vec<String>,
         supersede: Option<String>,
     ) -> Result<String> {
+        self.summarize_with_intent(tl, from, to, text, tokens, derived_from, supersede, None)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn summarize_with_intent(
+        &mut self,
+        tl: &str,
+        from: &str,
+        to: &str,
+        text: &str,
+        tokens: Option<u64>,
+        derived_from: Vec<String>,
+        supersede: Option<String>,
+        intent: Option<Intent>,
+    ) -> Result<String> {
+        validate_intent(&intent)?;
         let msg = message("summary", text, tokens)?;
-        self.add_summary(tl, from, to, msg, derived_from, supersede, false)
+        self.add_summary(tl, from, to, msg, derived_from, supersede, intent, false)
     }
     #[allow(clippy::too_many_arguments)]
     fn add_summary(
@@ -599,6 +658,7 @@ impl Database {
         msg: Message,
         derived_from: Vec<String>,
         supersede: Option<String>,
+        intent: Option<Intent>,
         placeholder: bool,
     ) -> Result<String> {
         let t = self.timeline(tl)?;
@@ -657,6 +717,7 @@ impl Database {
             supersedes: supersede,
             derived_from,
             stale: false,
+            intent,
         };
         let t = self.timeline_mut(tl)?;
         t.insert_node(node);
@@ -926,8 +987,18 @@ impl Database {
                         path[b]
                     ),
                     tokens: RESERVE,
+                    intent_tag: None,
                 };
-                let id = self.add_summary(tl, &path[a], &path[b], msg, Vec::new(), None, true)?;
+                let id = self.add_summary(
+                    tl,
+                    &path[a],
+                    &path[b],
+                    msg,
+                    Vec::new(),
+                    None,
+                    None,
+                    true,
+                )?;
                 created_ends.insert(b);
                 id
             };
@@ -954,11 +1025,17 @@ impl Database {
         let mut i = 1;
         while i < n {
             if kept[i] {
-                messages.push(t.node(&path[i])?.message.clone().unwrap());
+                let node = t.node(&path[i])?;
+                let mut message = node.message.clone().unwrap();
+                message.intent_tag = node.intent.as_ref().map(|intent| intent.tag.clone());
+                messages.push(message);
                 i += 1;
             } else {
                 let (end, id) = &replacements[&i];
-                messages.push(t.node(id)?.message.clone().unwrap());
+                let node = t.node(id)?;
+                let mut message = node.message.clone().unwrap();
+                message.intent_tag = node.intent.as_ref().map(|intent| intent.tag.clone());
+                messages.push(message);
                 i = end + 1;
             }
         }
