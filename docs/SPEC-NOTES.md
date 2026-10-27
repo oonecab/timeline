@@ -1,6 +1,6 @@
-# TIMELINE-SPEC v1.1.2：修正依据与实现解释
+# TIMELINE-SPEC v1.2.0：修正依据与实现解释
 
-[TIMELINE-SPEC.md](../TIMELINE-SPEC.md) 定义构建契约。v1.1.1 已解决归档搬运条件冲突，v1.1.2 已明确预算不可行错误；本文保留这些问题的推导，解释当前实现与回归测试。这里的规则适用于 Windows、Linux 和 macOS，数据库格式仍为 1，MCP 工具集版本仍为 1.1.0。
+[TIMELINE-SPEC.md](../TIMELINE-SPEC.md) 定义构建契约。v1.1.1 已解决归档搬运条件冲突，v1.1.2 已明确预算不可行错误，v1.2.0 增加意图标注；本文保留历史问题的推导，解释当前实现与回归测试。这里的规则适用于 Windows、Linux 和 macOS，数据库格式仍为 1，MCP 工具集契约为 1.2.0，仍有 14 个工具。
 
 ## 1. 预算中的 tokens 含义
 
@@ -29,7 +29,7 @@ v1.1.2 §5.5 已规定保证优先于参考伪码，输入不可行时必须显�
 
 §12 提到回填复用原节点，和 §3.4 的 `message` 永不改变冲突。实现优先保护不可变历史：回填生成同区间真实摘要的新节点，旧占位保留；归档判断将已有同区间真实摘要的占位视为已解决。显式 `supersede` 只能指向同区间真实摘要的最新版本；同一请求重复返回已有版本，其他请求不能让版本链分叉。
 
-§4 的“所有变更同参幂等”与 `append/create` 的追加语义、`fork` 重名报错和 `drop_branch` 不存在报错冲突。实现采用具体操作契约：pin/unpin/switch 为状态幂等；summarize 按区间、文本、tokens、derived_from 和 supersede 去重；create/append/fork/drop/archive 等通过可选幂等键去重。无 key 的两次 append 代表两条消息。键以 timeline 为作用域，create 使用独立作用域。
+§4 的“所有变更同参幂等”与 `append/create` 的追加语义、`fork` 重名报错和 `drop_branch` 不存在报错冲突。实现采用具体操作契约：pin/unpin/switch 为状态幂等；summarize 按区间、文本、tokens、derived_from、supersede 和完整 intent 去重；create/append/fork/drop/archive 等通过可选幂等键去重。无 key 的两次 append 代表两条消息。键以 timeline 为作用域，create 使用独立作用域。
 
 ## 5. 水位完整性优先于 unpin
 
@@ -48,7 +48,7 @@ v1.1.0 条款曾使可搬运集合恒为空，推导如下：
 
 v1.1.1 已移除第 4 步的“无摘要覆盖”限制。当前实现仍逐项判断三条件、拒绝当前分支归档；成功时删除分支指针并写入审计，将路径中热区的独有无 pin 原文节点搬到 `archive`。摘要节点始终留在热区；摘要覆盖不阻止原文搬运。共享节点不动，已在冷区的节点不重复搬运，也不再次出现在该次调用的 `archived` 中。归档不删除原文、不减少总节点数，也不承诺压缩同一 JSON 文件的大小。
 
-`parent`、`children` 和消息不随搬运改变，因此允许热摘要指向冷区父节点。节点查找、路径、原文上下文、前缀和、区间及派生索引按冷热区联合结构读取和重建；源数据的父子对应、无环、摘要区间、分支、水位和版本链约束继续验证。直接从冷节点 fork 拒绝；从热摘要 fork、追加以及读取其归档祖先可正常工作。显式恢复冷节点的操作仍预留给 v1.2。
+`parent`、`children`、消息和 intent 不随搬运改变，因此允许热摘要指向冷区父节点。节点查找、路径、原文上下文、前缀和、区间及派生索引按冷热区联合结构读取和重建；源数据的父子对应、无环、摘要区间、分支、水位和版本链约束继续验证。直接从冷节点 fork 拒绝；从热摘要 fork、追加以及读取其归档祖先可正常工作。显式恢复冷节点的操作留待后续版本。
 
 回归设计：覆盖非空独有原文搬运、共享节点保留、摘要留热、热摘要父节点转冷、原文不可变、归档审计及重启后冷热查询；随后从热摘要分支追加并再次归档，确认只报告新搬运节点。仍测试 pin、未回填占位、水位和当前分支拒绝条件；CLI/MCP 归档返回实际搬运 ID，并可据 ID 继续查询原文。
 
@@ -59,4 +59,14 @@ v1.1.1 已移除第 4 步的“无摘要覆盖”限制。当前实现仍逐项�
 - Linux/macOS 新建快照、备份与锁文件使用 `0600`；Windows 创建时使用受保护的仅所有者可访问 DACL。对应权限测试按平台编译和运行，不能从 Windows 本地结果推断 Unix 结果。Windows、Ubuntu、Apple Silicon Mac 和 Intel Mac 的完整 CI 均有通过记录，具体结果见 [验收记录](ACCEPTANCE.md#跨平台-ci)。平台差异集中在二进制、路径和文件系统操作，不改变上述预算、归档与幂等契约。
 - v1.1.1 已将 §13 第二项“6 条不变量”修正为 10 条。测试覆盖结构、前缀和、分支、区间、不可变源数据、水位、引用计数和版本链；O(1) `tokens` 由直接字段读取实现，不靠计时测试推断。
 
-可执行回归见 `tests/axioms.rs`、`tests/adversarial.rs`、`tests/spec_v112.rs` 和 `tests/interfaces.rs`；实际执行结果见 [ACCEPTANCE.md](ACCEPTANCE.md)，各平台的使用方式见 [运行环境](environments.md)。跨平台文档更新只补充平台说明，没有修改本页的计算规则、协议或存储格式。
+## 8. 意图标注与数据保护（v1.2.0）
+
+规格 §3.1–3.2、§4 和 §6 定义标注契约。`intent` 是节点源数据，包含非空字符串 tag 与可选 note，创建后不可变；没有标注的旧节点仍可读取。根与机械占位必须无标注。context/budget 只输出 tag，完整标注通过 node 查询；投影出的 `intent_tag` 不写回 message，不改变 tokens 计算。
+
+摘要去重若忽略 intent，会让相同文本、不同标签或备注的请求返回旧节点，调用方的新标注悄然丢失。因此实时索引和重建索引都包含完整 intent；无标注、无备注与空备注分别处理。相同参数的重试复用原节点，显式 supersede 仍须遵守单链约束；幂等键的首次结果语义不变。
+
+冷热两区都要验证标注。非法 tag、错误字段类型或根/占位上的标注属于源数据损坏，必须在执行事务前拒绝，保留数据库与已有备份。旧版本程序可能忽略并在写入时丢失新字段，因此有标注的数据应由 v1.2 或更新版本维护。
+
+回归设计：`summary_deduplication_distinguishes_intent_before_and_after_reload` 覆盖六种标注及重启后的同参复用；`invalid_persisted_intent_rejects_hot_and_cold_data_without_overwriting` 检查冷热损坏数据被拒绝且数据库、备份字节未变；`root_and_placeholder_annotations_are_rejected` 覆盖根、占位和失败原子性；`intent_survives_storage_roundtrip_without_persisting_output_fields` 验证持久化、上下文投影及备注隔离。另有旧数据、标注不可变、参数校验与输出形状测试。
+
+可执行回归见 `tests/axioms.rs`、`tests/adversarial.rs`、`tests/spec_v112.rs`、`tests/spec_v120.rs` 和 `tests/interfaces.rs`；实际执行结果见 [ACCEPTANCE.md](ACCEPTANCE.md)，各平台的使用方式见 [运行环境](environments.md)。

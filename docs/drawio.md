@@ -1,6 +1,6 @@
 # draw.io 文件导出
 
-`tl export` 把一条 Timeline 导出为可手动编辑的 `.drawio` 文件。它是 CLI 的只读扩展，不属于 v1.1.2 的 14 个 MCP 工具；现有 ADT 契约、数据库格式与 stdio 协议保持不变。本文件定义导出行为与展示规则。
+`tl export` 把一条 Timeline 导出为可手动编辑的 `.drawio` 文件。它是 CLI 的只读扩展，不属于 [构建规格](../TIMELINE-SPEC.md) 中的 14 个 MCP 工具；导出不改变 ADT 契约、数据库格式与 stdio 协议。本文件定义导出行为与展示规则。
 
 ## 使用
 

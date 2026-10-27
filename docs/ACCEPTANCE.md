@@ -154,3 +154,26 @@ shell 验证脚本、结果与文件位于未提交的 `target/ascii-smoke/`。�
 重新执行治理清单登记的 `cargo fetch --locked`、格式检查、Clippy、全目标测试及 Release 构建，五项退出码均为 0；**94 个测试通过，0 失败、0 忽略**。实测 `tl --version` 为 `tl 1.1.1`、`tl-mcp --version` 为 `tl-mcp 1.1.1`，使用独立临时数据库路径的 MCP 初始化返回服务版本 `1.1.1`。该初始化未创建数据库文件。
 
 本地证据保存在未提交的 `target/prepush-v1.1.1-validation/`。上述记录为发布前的 Windows 本地结果；tag 推送后的四平台检查、打包及发布结果以 [Release Actions](https://github.com/oonecab/timeline/actions/workflows/release.yml) 为准。
+
+## v1.2.0 意图标注与 PR #1 修复验收：2026-10-27
+
+本次验收针对 [PR #1](https://github.com/oonecab/timeline/pull/1) 的节点意图标注及其审查修复。Windows 本地执行治理清单登记的五项检查，全部成功；**102 个测试通过，0 失败、0 忽略**。四项新增回归中，摘要去重、冷热损坏保护、根与占位标注校验在修复前均能复现失败，修复后通过；原有测试保持启用。
+
+| 命令 | 结果 |
+|---|---|
+| `cargo fetch --locked` | 退出码 0 |
+| `cargo fmt --all -- --check` | 退出码 0 |
+| `cargo clippy --all-targets --locked -- -D warnings` | 退出码 0 |
+| `cargo test --all-targets --locked` | 退出码 0，102 项通过 |
+| `cargo build --release --locked` | 退出码 0 |
+
+`tests/spec_v120.rs` 共 8 项测试，覆盖旧数据库默认无标注、标注不可变、参数校验、上下文输出，以及以下修复边界：
+
+- 摘要去重包含完整 intent，区分无标注、无备注、空备注及不同标签/备注；保存后重建索引仍复用相同请求的节点。
+- 热区和冷区均拒绝空标签、缺失标签及错误字段类型；失败发生在事务执行前，数据库和已有备份逐字节不变。
+- 根与机械占位不能带标注；直接创建带标注的占位也会失败，且不消耗节点或修改状态。
+- 存储往返保留完整 intent，context/budget 仅输出 intent_tag，不输出 note，也不将 intent_tag 写入 message。
+
+另用实际 Release 二进制和独立临时数据库检查 CLI 的 append/node/context/budget，确认单独传 `--intent-note` 会报错且数据库未变；通过真实 stdio MCP 进程验证 initialize/tools-list/summarize/context、标注 schema 与 14 个工具。两个程序及 MCP 握手均报告版本 `1.2.0`。日志、逐项退出码和冒烟结果保存在未提交的 `target/pr-1-fix-validation/`。
+
+文档影响：同步 TIMELINE-SPEC v1.2.0、README、TECH、治理清单、SPEC-NOTES 和文档索引，补全输入输出、不可变、去重与损坏数据保护规则；发布指南更新版本示例，导出说明改为引用当前规格。没有新增依赖，没有修改 workflow、环境变量、端口或数据库格式版本，因此环境清单、`.env.example` 和技术栈变更索引无需更新，也无需新增 ADR。上述结果为 Windows 本地证据，PR 当前提交的四平台结果以 [CI Actions](https://github.com/oonecab/timeline/actions/workflows/ci.yml) 为准；本次未打 tag 或发布 Release。

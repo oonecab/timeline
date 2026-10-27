@@ -5,26 +5,31 @@ description: 在已接入 tl-mcp 的长任务会话中使用 Timeline，持续�
 
 # Timeline 长任务工作流
 
-使用 [TIMELINE-SPEC v1.1.2](TIMELINE-SPEC.md) 定义的工具。预算、去重、水位线与幂等机制由 tl-mcp 负责；Agent 决定何时调用、记录什么。服务接入方式见 [README](README.md#mcp-stdio-接入)，下面的工作流在各平台相同。
+使用 [TIMELINE-SPEC v1.2.0](TIMELINE-SPEC.md) 定义的工具。预算、去重、水位线与幂等机制由 tl-mcp 负责；Agent 决定何时调用、记录什么。服务接入方式见 [README](README.md#mcp-stdio-接入)，下面的工作流在各平台相同。
 
 ## 工作流程
 
 1. **启动与持续记录**
-   新任务调用 `timeline_create`；续接任务复用已有 `timeline_id`，用 `timeline_branches` 确认当前分支与 head。用 `timeline_append(role, text)` 记录用户任务、后续消息、关键结果与承诺；新输入先记录，再组装 prompt。保存返回的节点 ID；除 create 外，调用均带 `timeline_id`。
+   新任务调用 `timeline_create`；续接任务复用已有 `timeline_id`，用 `timeline_branches` 确认当前分支与 head。用 `timeline_append(role, text)` 记录用户任务、后续消息、关键结果与承诺；新输入先记录，再组装 prompt。保存返回的节点 ID；除 create 外，调用均带 `timeline_id`。每次 append 顺带传 `intent={tag, note}` 标明这一轮的目的：`tag` 取自词表（提问 / 指令 / 告知 / 承诺 / 决策 / 纠正 / 执行 / 报告 / 闲聊），`note` 一句话备注；拿不准时选最接近的 `tag`，不留空阻塞。标注写时生成、之后不改；一轮话的意义后来变了，用摘要重新阐释，不回头修改原标注。
 
 2. **只 pin 三类信息**
-   对对应节点调用 `timeline_pin(node)`：① 用户的明确决定或约束；② 长期偏好；③ 未兑现的承诺。临时推测、普通过程记录不 pin；承诺兑现或信息失效后，用 `timeline_unpin(node)` 解除保留。
+   对对应节点调用 `timeline_pin(node)`：① 用户的明确决定或约束；② 长期偏好；③ 未兑现的承诺。临时推测、普通过程记录不 pin；承诺兑现或信息失效后，用 `timeline_unpin(node)` 解除保留。判断时可参考节点的 `intent`：`决策`、`承诺` 类标注与上述三类高度重合，`闲聊` 类通常不 pin。
 
 3. **话题收尾或约 20 轮后整理摘要**
-   选择已完成讨论的连续区间，调用 `timeline_summarize(from, to, summary)`。摘要写给“未来的自己”，保留结论、关键依据和未决事项，合计不超过 **5 行**。修正旧摘要时，对同一区间带 `supersede=被替代的最新摘要节点 ID` 创建新版本，保留旧摘要，不原地改写；参考其他摘要时用 `derived_from` 声明其 ID。
+   选择已完成讨论的连续区间，调用 `timeline_summarize(from, to, summary)`。切分区间时优先按意图段：连续同一意图的轮次（如一串 `执行`）优先合并为一个摘要区间，意图切换处是天然的切分点。摘要写给“未来的自己”，保留结论、关键依据和未决事项，合计不超过 **5 行**。修正旧摘要时，对同一区间带 `supersede=被替代的最新摘要节点 ID` 创建新版本，保留旧摘要，不原地改写；参考其他摘要时用 `derived_from` 声明其 ID。给摘要节点传 `intent={tag:"摘要", note:"本段意图：X→Y"}` 记录本段的意图走向。
 
 4. **用分支探索另一条路线**
-   从分歧起点调用 `timeline_fork(node, name)`，再用 `timeline_switch(name)` 切入新分支后继续 append。选定路线后切回对应分支继续工作。不同分支保持独立，不合并分支，也不拼接它们的历史。
+   从分歧起点调用 `timeline_fork(node, name)`，再用 `timeline_switch(name)` 切入新分支后继续 append。意图切换点（如从 `执行` 转为 `纠正`、或出现新的 `指令`）是天然的 fork 候选信号，是否 fork 仍由你或用户决定。选定路线后切回对应分支继续工作。不同分支保持独立，不合并分支，也不拼接它们的历史。
 
 5. **停用分支先检查，再 archive**
    完成必要摘要，切换离开待归档分支，再调用 `timeline_archive_check(branch)`；仅在 `eligible=true` 时调用 `timeline_archive_branch(branch)`。否则按 `reasons` 处理后重查，不为归档解除仍有必要的 pin。自 v1.1.1 起，归档会实际搬运分支独有节点，**被摘要覆盖的独有原文也搬运；摘要节点留在热区**，共享节点保持原位。归档不删除原文。
 
 6. **每次组装 prompt 前取上下文**
-   调用 `timeline_context_budget(node=当前分支 head, max_tokens=本次上下文预算)`。给模型的会话上下文**只来自返回的 `messages`，按返回顺序原样使用**；不另拼原始历史，不自行截断、筛选或用自制摘要替换。收到 `budget infeasible`，表示强制保留部分及必要摘要已无法容纳于上界：放宽 `max_tokens`，或解除不必要的 pin，再重新调用；成功前不组装替代上下文继续。
+   调用 `timeline_context_budget(node=当前分支 head, max_tokens=本次上下文预算)`。给模型的会话上下文**只来自返回的 `messages`，按返回顺序原样使用**；不另拼原始历史，不自行截断、筛选或用自制摘要替换。返回的消息可能带有 `intent_tag`（节点标注的 tag），可渲染为前缀一个词帮助模型理解每轮目的；无标注的消息没有此字段。收到 `budget infeasible`，表示强制保留部分及必要摘要已无法容纳于上界：放宽 `max_tokens`，或解除不必要的 pin，再重新调用；成功前不组装替代上下文继续。
+
+7. **任务结束记经验，下次先读经验**
+   维护一个 `EXPERIENCE.md`，与 timeline DB 文件（`--db` 指向的）放在同一目录；DB 目录不明确时放当前工作目录，不存在就创建。它只记任务级经验（只继承经验，不继承成品）：append-only，每条目包含日期、任务一句话描述、本次用的分支/摘要/pin 策略、哪条有效/哪条踩坑、证据一句话，每条目不超过 **8 行**。任务开始时（第 1 步之前）若它存在，读一遍，只取与当前任务类型相关的条目，用来指导本次的分支/摘要/pin 决策；任务结束时（或长任务的自然断点）追加一条。经验是给你看的决策参考，**不塞进模型上下文**——第 6 步“上下文只来自 `context_budget` 返回的 `messages`”不受影响。
+
+**检索纪律：** 回答“我们什么时候定的这个”一类问题时，优先按 `intent` 字段定位（用 `timeline_node` 抽查或沿分支回溯 `决策`/`承诺` 类节点），而非全文搜索历史。
 
 **幂等与重试：** MCP 调用从首次请求起带 `idempotency_key`。失败或结果不明时，重试同一操作应复用同一 key 和参数；修正参数或发起新操作时换新 key。短暂故障可有限重试，持续失败则报告阻塞。参数或前置条件错误需要先处理原因，再发起请求。

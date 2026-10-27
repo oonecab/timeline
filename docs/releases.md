@@ -12,7 +12,7 @@
 
 ## 推送一个新版本
 
-下面以下一次版本 `v1.1.2` 为例，请替换为实际要发布且尚未使用的版本。命令可以在 PowerShell、bash 或 zsh 中运行。
+下面以 `v1.2.0` 为例，请替换为实际要发布且尚未使用的版本。命令可以在 PowerShell、bash 或 zsh 中运行。
 
 先确认工作区、目标提交和远端地址，并检查这个 tag 是否已被使用：
 
@@ -21,15 +21,15 @@ git status --short
 git log -1 --oneline
 git remote -v
 git show HEAD:.github/workflows/release.yml
-git tag --list v1.1.2
-git ls-remote --tags origin refs/tags/v1.1.2
+git tag --list v1.2.0
+git ls-remote --tags origin refs/tags/v1.2.0
 ```
 
 `git status --short` 应没有待发布的未提交改动；后两条查询应没有同名 tag 的输出。确认 `HEAD` 就是要发布的提交，本地检查已通过，再创建带说明的 tag，并只推送这一个 tag：
 
 ```sh
-git tag -a v1.1.2 HEAD -m "Release v1.1.2"
-git push origin refs/tags/v1.1.2
+git tag -a v1.2.0 HEAD -m "Release v1.2.0"
+git push origin refs/tags/v1.2.0
 ```
 
 这些命令会发布所选提交，请在版本准备好时执行。不要为了补发版本移动或覆盖旧 tag，也不要一次推送全部 tag；如果名称已使用，选一个新的版本名。

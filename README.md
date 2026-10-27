@@ -4,7 +4,7 @@ Timeline 用来保存 LLM 对话、探索不同分支，并在压缩上下文后
 
 Windows、Linux、Apple Silicon Mac 和 Intel Mac 使用各自的二进制包，下载后无需安装 Rust。程序运行时不联网、不监听端口，也不依赖后台服务。
 
-第一次使用可以从下面的下载步骤开始；接入客户端见 [MCP 配置](#mcp-stdio-接入)，路径与权限见 [环境说明](docs/environments.md)。实现遵循 [TIMELINE-SPEC v1.1.2](TIMELINE-SPEC.md)，设计边界与历史修正见 [SPEC-NOTES](docs/SPEC-NOTES.md)。
+第一次使用可以从下面的下载步骤开始；接入客户端见 [MCP 配置](#mcp-stdio-接入)，路径与权限见 [环境说明](docs/environments.md)。实现遵循 [TIMELINE-SPEC v1.2.0](TIMELINE-SPEC.md)，设计边界与历史修正见 [SPEC-NOTES](docs/SPEC-NOTES.md)。
 
 ## 下载与开始使用
 
@@ -108,6 +108,8 @@ CLI 支持全局参数 `--db PATH`、`--timeline TL`、`--idempotency-key KEY`�
 
 MCP 除 create 外均须显式传 timeline_id；CLI `--max` 对应 `max_tokens`，`--derived-from` 对应字符串数组 `derived_from`，归档 `--name` 对应 `branch`。完整参数 schema 由 tools/list 返回。
 
+`append` 和 `summarize` 还可附带 `--intent-tag` 与 `--intent-note`；MCP 中对应可选 `intent` 对象，示例见下节。
+
 role 允许 user/assistant/system/summary；节点 ID 为 n 加数字；分支名非空且禁止 `/`，支持 Unicode。单条 text 上限 1 MiB UTF-8，context/budget 输出上限 100000 条消息。tokens 和预算须为非负整数；溢出显式报错。
 
 以下示例假设 demo.timeline.json 尚不存在：
@@ -122,6 +124,30 @@ tl --db demo.timeline.json append --role user --text "细化验收" --tokens 6
 tl --db demo.timeline.json context --node n3
 tl --db demo.timeline.json branches
 ```
+
+### 给消息或摘要加意图标注
+
+想区分“提问”“决策”“执行”等内容，可以在写入时加一个标签。词表由你决定，不加标签也能照常使用。下面的命令在 PowerShell、bash 和 zsh 中都适用，仍按前文选择 `tl`、`.\tl.exe` 或 `./tl`：
+
+```sh
+tl --db demo.timeline.json append --role user --text "先完成本地版本" --intent-tag "决策" --intent-note "暂时不需要云同步"
+tl --db demo.timeline.json summarize --from n1 --to n2 --summary "已明确目标和范围" --intent-tag "阶段总结"
+```
+
+`--intent-note` 必须和 `--intent-tag` 一起使用。对应的 MCP `timeline_append` 参数为：
+
+```json
+{
+  "timeline_id": "tl0",
+  "role": "user",
+  "text": "先完成本地版本",
+  "intent": {"tag": "决策", "note": "暂时不需要云同步"}
+}
+```
+
+标签必须是非空字符串；备注可以省略。标注写入后不能修改，归档后仍保留。`context` 和 `budget` 中，有标注的消息会多一个 `intent_tag` 字段，无标注的消息维持原来的形状；备注不会进入上下文，需要时用 `node` / `timeline_node` 查看完整 `intent`。
+
+摘要的区间、文本及其他参数相同，但标签或备注不同，会保存为不同节点；完全相同的请求在重启后仍复用原节点。显式 `--supersede` 继续遵循摘要版本链规则；使用同一幂等键则始终返回首次结果。预算仍按消息的 `tokens` 计算，不另计标签开销。详细契约见 [规格 §3–4](TIMELINE-SPEC.md#3-数据模型)。
 
 ## 导出可编辑的节点图
 
@@ -198,11 +224,11 @@ Linux/macOS 新建的数据库、备份和锁文件权限为 `0600`；Windows �
 | prefix_tokens | 根据 parent 链重算消息前缀和 |
 | covers、真实摘要语义覆盖 | 根据摘要区间重建；机械占位不进入语义索引 |
 | refcount | 按分支路径数、摘要覆盖数与 pin 查询计算 |
-| 占位复用、真实摘要区间、摘要参数索引 | 根据现有摘要节点重建 |
+| 占位复用、真实摘要区间、摘要参数索引 | 根据现有摘要节点重建，摘要参数索引包含完整 intent |
 | 版本后继、反向依赖、stale | 根据 supersedes/derived_from 重建并传播 |
 | 水位路径集合 | 根据持久化 watermark 与 parent 重建 |
 
-读取时会丢弃损坏的 prefix_tokens/stale 并重建；源数据损坏仍会报错。派生重建和结构验证同时覆盖热区与归档区。数据库 `format_version` 为 1，缺少 v1.1 新字段的旧文件按规格补齐；MCP 工具集版本为 1.1.0。
+读取时会丢弃损坏的 prefix_tokens/stale 并重建；源数据损坏仍会报错，包括非法 intent，且不会覆盖数据库和已有备份。派生重建和结构验证同时覆盖热区与归档区。数据库 `format_version` 为 1，缺少 v1.1/v1.2 新字段的旧文件按规格补齐，无 intent 时视为未标注；MCP 工具集契约为 1.2.0，仍提供 14 个工具。含标注的数据库应使用 v1.2 或更新版本读写，旧程序不保证保留新字段。
 
 ## 审计与恢复
 
@@ -284,7 +310,7 @@ macOS（Apple Silicon 和 Intel 配置形式相同，使用各自的包）：
 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"timeline_append","arguments":{"timeline_id":"tl0","role":"user","text":"你好","idempotency_key":"message-001"}}}
 ```
 
-支持 ping。初始化报告服务名 timeline，服务版本与 `Cargo.toml` 的包版本一致，当前为 1.1.1；支持协商 2024-11-05、2025-03-26、2025-06-18、2025-11-25，未知版本返回 2025-11-25 供客户端决定是否继续，不承诺未来协议功能。旧两个版本支持 batch 串行处理；2025-06-18 及以后只接受单请求。遵循 [MCP 生命周期](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)、[stdio 传输](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)与[旧版基础协议](https://modelcontextprotocol.io/specification/2025-03-26/basic)。
+支持 ping。初始化报告服务名 timeline，服务版本与 `Cargo.toml` 的包版本一致，当前为 1.2.0；支持协商 2024-11-05、2025-03-26、2025-06-18、2025-11-25，未知版本返回 2025-11-25 供客户端决定是否继续，不承诺未来协议功能。旧两个版本支持 batch 串行处理；2025-06-18 及以后只接受单请求。遵循 [MCP 生命周期](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)、[stdio 传输](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)与[旧版基础协议](https://modelcontextprotocol.io/specification/2025-03-26/basic)。
 
 所有版本的成功结果均在 `result.content[0].text` 中保存工具 JSON 字符串；2025-06-18 及以后的对象结果同时返回 structuredContent。幂等键可在 arguments 或 params 中，两处同时提供须一致。领域错误 code=-32000，协议错误使用对应标准错误码；通知不回应也不执行变更工具。预算不可行返回 `error` 对象 `{"code":-32000,"message":"budget infeasible","data":{"required_tokens":65,"max_tokens":1}}`（此数值对应上文反例）。
 

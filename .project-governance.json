@@ -30,7 +30,7 @@
       "MCP 提供 14 个工具，按行处理 stdio JSON-RPC；应用运行期间不访问网络、不监听端口。",
       "CLI 额外提供只读 `drawio` / `ascii` 导出；生成可编辑的横向节点图或终端分支树，独立保存或输出文本，不回写数据库，不新增 MCP 工具或网页服务。",
       "源数据持久化，派生字段和索引读取时重建；每次成功变更全量 checkpoint，未启用可选增量日志或水位扫描优化。",
-      "构建依据为 TIMELINE-SPEC v1.1.2；归档将独有原文搬入同文件冷区，摘要保留在热区，原文及 parent/children 不变；只读查询跨冷热区。预算不可行返回 budget infeasible 与 required_tokens/max_tokens；历史修正与边界解释见 docs/SPEC-NOTES.md。"
+      "构建依据为 TIMELINE-SPEC v1.2.0；节点可保存不可变 intent，上下文只输出 intent_tag；归档将独有原文搬入同文件冷区，摘要保留在热区，原文及 parent/children 不变；只读查询跨冷热区。预算不可行返回 budget infeasible 与 required_tokens/max_tokens；历史修正与边界解释见 docs/SPEC-NOTES.md。"
     ]
   },
   "commands": {
