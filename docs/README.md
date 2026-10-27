@@ -20,14 +20,14 @@
 
 | 想了解的内容 | 文档 |
 |---|---|
-| 下载与启动、CLI/MCP 配置、预算、存储与恢复 | [README](../README.md) |
+| 下载与启动、CLI/MCP 配置、意图标注、预算、存储与恢复 | [README](../README.md) |
 | 导出可手动编辑的横向节点图、图层含义与只读边界 | [draw.io 导出](drawio.md) |
 | 在 Bash / PowerShell 查看 ASCII 分支树、管道与文本文件输出 | [终端图](ascii.md) |
 | 用 tag 发布四平台二进制、发布权限与重跑规则 | [发布指南](releases.md) |
 | 各系统的路径与环境变量、执行权限、CI 平台兼容范围 | [运行环境](environments.md) |
 | 架构、模块、依赖及技术栈变更 | [TECH.md](../TECH.md) |
 | 数据模型、操作契约、§9 测试映射与 §13 验收清单 | [TIMELINE-SPEC.md](../TIMELINE-SPEC.md) |
-| v1.1.1/v1.1.2 修复的历史冲突、实现边界与回归设计 | [SPEC-NOTES.md](SPEC-NOTES.md) |
+| 预算与归档的历史修正、v1.2 标注边界与回归设计 | [SPEC-NOTES.md](SPEC-NOTES.md) |
 | Windows 本地历史验收、持续 CI 与各平台的执行证据 | [ACCEPTANCE.md](ACCEPTANCE.md) |
 | Agent 如何在仓库中协作 | [AGENTS.md](../AGENTS.md) |
 

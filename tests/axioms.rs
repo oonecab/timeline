@@ -81,11 +81,12 @@ fn axiom_path_is_context() {
     assert_eq!(t.context(&ids[2]).unwrap().len(), 3);
     // v1.2 output shape: messages carry `intent_tag` only for annotated
     // nodes, so unannotated history keeps the pre-v1.2 shape exactly.
-    assert!(t
-        .context(&branch)
-        .unwrap()
-        .iter()
-        .all(|m| m.intent_tag.is_none()));
+    assert!(
+        t.context(&branch)
+            .unwrap()
+            .iter()
+            .all(|m| m.intent_tag.is_none())
+    );
 }
 #[test]
 fn axiom_branch_isolation() {

@@ -40,7 +40,7 @@
 - MCP 提供 14 个工具，按行处理 stdio JSON-RPC；应用运行期间不访问网络、不监听端口。
 - CLI 额外提供只读 `drawio` / `ascii` 导出；生成可编辑的横向节点图或终端分支树，独立保存或输出文本，不回写数据库，不新增 MCP 工具或网页服务。
 - 源数据持久化，派生字段和索引读取时重建；每次成功变更全量 checkpoint，未启用可选增量日志或水位扫描优化。
-- 构建依据为 TIMELINE-SPEC v1.1.2；归档将独有原文搬入同文件冷区，摘要保留在热区，原文及 parent/children 不变；只读查询跨冷热区。预算不可行返回 budget infeasible 与 required_tokens/max_tokens；历史修正与边界解释见 docs/SPEC-NOTES.md。
+- 构建依据为 TIMELINE-SPEC v1.2.0；节点可保存不可变 intent，上下文只输出 intent_tag；归档将独有原文搬入同文件冷区，摘要保留在热区，原文及 parent/children 不变；只读查询跨冷热区。预算不可行返回 budget infeasible 与 required_tokens/max_tokens；历史修正与边界解释见 docs/SPEC-NOTES.md。
 
 ## 项目类型约束
 
@@ -60,7 +60,8 @@
 - `src/lib.rs`：纯 ADT、全局确定性计数器、操作契约、源结构验证与派生索引重建；Timeline.nodes/branches 为 HashMap，Database.timelines 为 BTreeMap。CLI 默认 timeline 按 ID 数字选最早创建者。
 - `src/storage.rs`：路径、稳定 sidecar 文件锁、事务、Unix 秒时间、7 天幂等结果、全量原子快照及上一版本 `.bak`。持久化计数器载入 Database 后由核心在事务内分配；核心不读取时钟或产生随机 ID。
 - `src/service.rs`：14 项工具的参数校验与分发；`src/bin/tl.rs`、`src/bin/tl-mcp.rs` 分别提供 CLI 与逐行 stdio JSON-RPC。
-- 当前应用版本为 `1.1.1`；两个二进制的 `--version` 与 MCP `serverInfo.version` 均读取 Cargo 包版本。此版本新增只读导出，MCP 工具集契约仍为 1.1.0，数据库格式仍为 v1。
+- 当前应用版本为 `1.2.0`；两个二进制的 `--version` 与 MCP `serverInfo.version` 均读取 Cargo 包版本。MCP 工具集契约为 1.2.0，仍为 14 个工具；数据库格式仍为 v1。
+- 节点 `intent` 是可选、不可变的源数据，由 append/summarize 在创建时写入，包含非空 tag 与可选 note；根和机械占位无标注。摘要去重及其重建索引包含完整 intent，防止复用错误标注。context/budget 只投影 intent_tag，不输出 note，也不把投影字段写入 message；预算仍按 message.tokens 计算。`tests/spec_v120.rs` 覆盖旧数据、不可变、去重、冷热损坏保护和存储往返。
 - `src/drawio.rs`：纯只读图投影，将所选 Timeline 全部冷热节点转成未压缩 draw.io XML；使用稳定的迭代树布局，当前路径优先，父子关系与摘要关联分层。CLI 通过现有 `Storage::read` 读取，用已有 tempfile 写独立文件并拒绝覆盖。格式、展示与输出契约见 [导出说明](docs/drawio.md)。
 - `src/export_graph.rs`：两个导出器共用的只读拓扑校验、冷热合并、稳定排序和当前路径优先遍历；不属于存储层或 MCP 接口。`src/ascii.rs` 用 ASCII 连线和 UTF-8 预览生成终端分支树，连续历史保持同一列。仅 ASCII 不传输出路径时向 stdout 打印文本，保存文件时沿用拒绝覆盖与 JSON 结果；stdout 管道提前关闭时正常退出。详细契约见 [终端图说明](docs/ascii.md)。
 - `tests/drawio.rs`：导出回归；`roxmltree 0.21` 仅为 dev-dependency，用独立 XML 解析器校验导出文件，不进入发布二进制。未新增运行时核心依赖，存储格式、MCP 接口和环境变量不变。
@@ -69,13 +70,13 @@
 - `.github/workflows/ci.yml`：GitHub Actions 在 push/pull_request 时使用 stable Rust，分别在 `ubuntu-latest`（x64）、`macos-latest`（arm64）、`macos-15-intel`（x64）和 `windows-latest`（x64）执行 test、clippy、fmt，再构建 Release。四个 job 执行相同检查，包括 Intel Mac 上的原生测试。产物命名为 `timeline-${{ matrix.os }}`，只包含对应 runner 的 `tl`/`tl-mcp`（Windows 为 `.exe`）。
 - `.github/workflows/release.yml`：推送任意 tag 时，在上述四个平台重新执行相同检查与构建；四个平台全部成功后，由独立 job 发布该 tag 的 GitHub Release。Windows 包为 ZIP，Linux/macOS 包为保留执行权限的 tar.gz，每包根目录仅含两个二进制。构建 job 只有 `contents: read`，发布 job 通过 GitHub 自动提供的令牌获得 `contents: write`；未增加应用环境变量或外部运行时服务。发布步骤和下载方式见 [发布说明](docs/releases.md)。
 - CI 二进制需要匹配使用者的系统及 CPU 架构；Intel Mac 包不是通用 macOS 包，也不保证所有旧版 macOS 都兼容。`macos-15-intel` 的可用期受 GitHub 镜像弃用安排约束，不能作为永久分发渠道；平台选择及官方公告见 [环境说明](docs/environments.md)，实际测试结果见 [验收记录](docs/ACCEPTANCE.md)。
-- 数据格式保持 v1，MCP 工具集版本保持 1.1.0；新元数据缺失按规格补齐，损坏的 prefix_tokens/stale 丢弃后重建；parent/children/message/branches 等源数据损坏拒绝读取及覆盖。
-- 归档把独有无 pin 原文从 nodes 搬到 archive；摘要留热，允许其 parent 指向冷区，不改写 parent/children/message。核心节点、路径、context、tokens 及索引重建读取两区；fork 必须以热节点为起点，显式冷区恢复预留给 v1.2。
+- 数据格式保持 v1；新元数据缺失按规格补齐，旧节点无 intent 时按 None 读取。损坏的 prefix_tokens/stale 丢弃后重建；parent/children/message/branches/intent 等源数据损坏拒绝读取及覆盖，检查同时覆盖 nodes 与 archive。旧程序不保证保留新增标注，有标注的数据应使用 v1.2 或更新版本读写。
+- 归档把独有无 pin 原文从 nodes 搬到 archive；摘要留热，允许其 parent 指向冷区，不改写 parent/children/message/intent。核心节点、路径、context、tokens 及索引重建读取两区；fork 必须以热节点为起点，显式冷区恢复留待后续版本。
 - 预算不可行错误的消息为 budget infeasible，数据为最低布局总成本 required_tokens 和输入 max_tokens；CLI 在 error/data 返回，MCP 在 JSON-RPC error.message/data 返回。失败不提交任何变更。
 - 派生状态包括 prefix_tokens、covers、真实摘要语义覆盖、占位复用、真实摘要区间、摘要参数索引、版本后继、依赖反向关系、水位路径和 stale；refcount 按查询计算。完整清单见 [README](README.md)。
 - 新建快照、备份、锁在 Windows 使用创建时受保护 DACL `D:P(A;;FA;;;OW)`，Linux/macOS 使用 `0600`；权限回归在对应平台条件编译并由 CI 执行，已确认的运行证据见 [验收记录](docs/ACCEPTANCE.md)。Windows 通过 tempfile 的 MoveFileExW 覆盖，Linux/macOS 通过 rename 并同步父目录，不先删除目标。
 - 应用只读取 TIMELINE_DB/USERPROFILE/HOME，不自动加载 `.env`；无外部服务、网络访问或监听端口。环境权威清单见 [docs/environments.md](docs/environments.md)。
-- [TIMELINE-SPEC.md](TIMELINE-SPEC.md) v1.1.2 是构建权威；已解决的预算与归档冲突，以及不可变回填、unpin、占位和水位边界解释见 [docs/SPEC-NOTES.md](docs/SPEC-NOTES.md)。未启用增量日志；水位优化的两个参数值目前执行相同全路径扫描。
+- [TIMELINE-SPEC.md](TIMELINE-SPEC.md) v1.2.0 是构建权威；预算与归档的历史修正，以及不可变回填、unpin、占位、水位和标注边界解释见 [docs/SPEC-NOTES.md](docs/SPEC-NOTES.md)。未启用增量日志；水位优化的两个参数值目前执行相同全路径扫描。
 
 ## 技术栈变更索引（只追加）
 

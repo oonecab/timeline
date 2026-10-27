@@ -40,7 +40,7 @@ fn optional_tokens(args: &Value, key: &str) -> Result<Option<u64>> {
         .transpose()
 }
 
-/// Spec §3.1/§A(a): output messages carry `intent_tag` only when the
+/// Spec §3.1: output messages carry `intent_tag` only when the
 /// originating node is annotated. The field is memory-only on `Message`
 /// (never persisted), so the transport shapes it explicitly.
 fn message_json(message: &Message) -> Value {
@@ -167,9 +167,9 @@ pub fn validate_arguments(tool: &str, args: &Value) -> Result<()> {
                 // Spec §10: tag must be a nonempty string, note any string.
                 // The tag vocabulary is governed by the skill layer and is
                 // deliberately not enum-validated here.
-                let object = args[key].as_object().ok_or_else(|| {
-                    Error::new("intent must be an object with a tag".into())
-                })?;
+                let object = args[key]
+                    .as_object()
+                    .ok_or_else(|| Error::new("intent must be an object with a tag".into()))?;
                 for field in object.keys() {
                     if field != "tag" && field != "note" {
                         return Err(Error::new(format!("unknown intent field: {field}")));
@@ -245,9 +245,7 @@ pub fn dispatch(db: &mut Database, tool: &str, args: &Value) -> Result<Value> {
             json!({"dropped": name})
         }
         "timeline_context" => {
-            let messages = db
-                .timeline(timeline_id)?
-                .context(string(args, "node")?)?;
+            let messages = db.timeline(timeline_id)?.context(string(args, "node")?)?;
             json!(messages.iter().map(message_json).collect::<Vec<_>>())
         }
         "timeline_context_budget" => {

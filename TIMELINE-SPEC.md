@@ -1,6 +1,9 @@
-# Timeline ADT 设计规格书（TIMELINE-SPEC v1.1.2）
+# Timeline ADT 设计规格书（TIMELINE-SPEC v1.2.0）
 
-> 日期：2026-10-13 ｜ 状态：构建依据（authoritative）
+> 日期：2026-10-27 ｜ 状态：构建依据（authoritative）
+> v1.2.0 修订：消息和真实摘要可在创建时附带不可变的意图标注 `intent`；
+> 上下文只输出标签 `intent_tag`，备注通过节点详情读取。旧数据库无需迁移，
+> MCP 仍为 14 个工具，`format_version` 保持 1。
 > v1.1.0 修订：在 v1.0.0 的 6 条公理与 14 个操作契约基础上，吸收 6 项来自论文研读的改进
 > （上下文水位线、预算优先级分层、归档三条件、源/派生数据分离、增量 checkpoint 与幂等键、
 > 摘要版本链）。新增 2 个操作契约（共 16 个）、2 个 MCP 工具（共 14 个）；DB 格式向后兼容，
@@ -96,9 +99,14 @@ timeline/
 | role   | string | `user` / `assistant` / `system` / `summary`（允许扩展，但这四个为标准） |
 | text   | string | 内容 |
 | tokens | u64    | 调用方提供的 token 数。**ADT 不做分词**，保持纯粹与可测试 |
+| intent_tag | string（可选，仅上下文输出） | 取自节点 `intent.tag`；无标注时省略，不写入持久化的 message |
 
 缺省 token 估计器（调用方未提供时）：`E(text) = max(1, ceil(字符数 / 4))`，
 字符按 Unicode 标量计数。实现必须在文档中声明此公式（保证测试可复现）。
+
+`context` 和 `context_budget.messages` 中的每条消息包含 `role`、`text`、`tokens`，
+有标注时另含 `intent_tag`；`intent.note` 不进入上下文。标签不改变原文或预算算法，
+`total_tokens` 仍为所选消息 `tokens` 之和，不额外估计标签的开销。
 
 ### 3.2 TLNode（节点）
 
@@ -115,6 +123,12 @@ timeline/
 | supersedes | string \| null              | 摘要节点：被本版本替代的旧版本节点 id；首版为 null |
 | derived_from | string[]                  | 摘要节点：本摘要撰写时参考的摘要节点 id 列表；默认空 |
 | stale | bool                          | 摘要节点：**派生字段**，默认 false；当 `derived_from` 中的任一摘要发布了新版本时置 true |
+| intent | `{tag: string, note?: string}` \| null | v1.2 新增的源数据；创建时写入，之后不可修改；旧数据缺失时为 null |
+
+`intent.tag` 必须是非空字符串，不限制词表；`note` 是可选备注，允许空字符串。
+节点可以不带标注，根节点和机械占位必须没有标注。完整 `intent` 由 `node` 查询返回，
+也随节点归档保存。持久化时无备注可表示为缺失或 null；MCP 写入时若提供 `note`，
+它必须是字符串。标注不会自动继承父节点、被覆盖原文或旧版摘要的标注。
 
 ### 3.3 Timeline
 
@@ -135,7 +149,7 @@ timeline/
 4. `summary_range.from` 必须是 `summary_range.to` 的祖先（可相等），且二者在同一分支上。
 5. **节点近似不可变**：除 `pinned` 标志和 `children` 列表（追加子节点时）外，
    任何操作不得修改已有节点的字段。`message` / `parent` / `prefix_tokens` /
-   `summary_range` 一经创建永不改变。
+   `summary_range` / `intent` 一经创建永不改变。
 6. `tokens(node)` 必须为 O(1)（直接读 `prefix_tokens`，不得遍历重算）。
 7. **水位完整性**：若 `watermark = W ≠ null`，则 root→W 路径上每个非根节点 n 满足：
    `n.pinned ∨ (∃摘要节点 s: n ∈ [s.from, s.to])`（占位摘要也算覆盖）。
@@ -172,7 +186,7 @@ MCP 层另有 `idempotency_key` 服务端去重（见 §7.1）。
 | # | 操作 | 签名 | 前置 / 后置 / 复杂度 |
 |---|------|------|----------------------|
 | 1 | create | `create() → timeline_id` | 新时间线：根节点（message=null），`branches={"main": root}`。O(1) |
-| 2 | append | `append(role, text, tokens?) → node_id` | 在 current_branch 的 head 后追加；新节点 parent=head；head 更新为新节点；`prefix_tokens` 按不变量 2 计算。O(1) |
+| 2 | append | `append(role, text, tokens?, intent?) → node_id` | 在 current_branch 的 head 后追加；新节点 parent=head；head 更新为新节点；`prefix_tokens` 按不变量 2 计算。O(1) |
 | 3 | fork | `fork(node_id, name) → void` | name 在本 timeline 内唯一（重复则错）；新分支 head=node_id；**零拷贝**：不复制任何节点。O(1) |
 | 4 | switch | `switch(name) → void` | name 必须存在；设置 current_branch。O(1) |
 | 5 | drop_branch | `drop_branch(name) → void` | name 必须存在；**不能删除当前分支**（错）；`main` 与其他分支规则相同。只删分支指针，不删节点。O(1) |
@@ -180,18 +194,26 @@ MCP 层另有 `idempotency_key` 服务端去重（见 §7.1）。
 | 7 | tokens | `tokens(node_id) → u64` | 返回 `prefix_tokens`。**O(1)**（不变量 6） |
 | 8 | pin | `pin(node_id) → void` | 置 `pinned=true`。O(1) |
 | 9 | unpin | `unpin(node_id) → void` | 置 `pinned=false`。O(1) |
-| 10 | summarize | `summarize(from_id, to_id, summary_text, tokens?, derived_from?, supersede?) → node_id` | from 须为 to 的祖先（可相等），否则错；新节点为 `parent(from)` 的子节点，`message.role="summary"`，`summary_range={from,to}`，`summary_version=1`；**原文节点不动**（遗忘可逆）。`supersede` 给出时：须为同区间的已回填摘要，新节点 `summary_version=旧版+1`、`supersedes=旧版 id`，旧版保留；所有 `derived_from` 含旧版的摘要置 `stale=true`（级联）。O(1)+O(区间长度校验) |
+| 10 | summarize | `summarize(from_id, to_id, summary_text, tokens?, derived_from?, supersede?, intent?) → node_id` | from 须为 to 的祖先（可相等），否则错；新节点为 `parent(from)` 的子节点，`message.role="summary"`，`summary_range={from,to}`，`summary_version=1`；**原文节点不动**（遗忘可逆）。`supersede` 给出时：须为同区间的已回填摘要，新节点 `summary_version=旧版+1`、`supersedes=旧版 id`，旧版保留；所有 `derived_from` 含旧版的摘要置 `stale=true`（级联）。O(1)+O(区间长度校验) |
 | 11 | context_budget | `context_budget(node_id, max_tokens) → BudgetResult` | 精确算法见 §5。`BudgetResult={messages, total_tokens, summaries_created}` |
 | 12 | branches | `branches() → [{name, head, current}]` | O(分支数) |
 | 13 | node | `node(node_id) → TLNode` | 返回节点详情（含 children/pinned/prefix_tokens/summary_range）。O(1) |
 | 14 | （隐式） | ID 计数器递增 | 由 Storage 层在每次 create/append/summarize（含占位）时执行 |
+
+v1.2 保留 Rust 原有 `append` / `summarize` 调用方式，等价于不传标注；
+需要标注时使用 `append_with_intent` / `summarize_with_intent`。
+摘要去重比较区间、消息、`derived_from`、`supersede` 和完整 `intent`（tag 与 note）。
+相同参数重复调用，包括保存后重新读取，必须返回同一节点；未标注、无备注和空备注是不同状态。
+不指定 `supersede` 时，不同标注创建独立摘要，不能静默复用旧标注。
+指定 `supersede` 时仍只能替代最新版本，不能借更换标注使版本链分叉。
+显式幂等键仍优先返回该键的首次结果，语义见 §6.2。
 
 ### 4.1 归档与水位相关操作（v1.1 新增，操作 15–16）
 
 | # | 操作 | 签名 | 前置 / 后置 / 复杂度 |
 |---|------|------|----------------------|
 | 15 | archive_check | `archive_check(branch) → {eligible: bool, reasons: string[]}` | 纯查询。按**归档三条件**逐项判定分支是否可归档：① **水位条件**：`watermark ≠ null`，且 head 为 watermark 本身或其祖先（分支内容已全部越过水位线）；② **无 pin**：root→head 路径上无 `pinned` 节点；③ **无未回填的摘要依赖**：不存在仍为 PLACEHOLDER 模板的摘要节点，其 `summary_range` 与该路径相交。`reasons` 列出不满足的条件。O(路径长 + 摘要数) |
-| 16 | archive_branch | `archive_branch(branch) → {archived: string[]}` | 前置：`archive_check(branch).eligible` 必须为 true，否则错；不能归档当前分支。语义：将该分支**独有**节点（经过该节点的分支 head 数 == 1、且无 pin）移入 `archive` 区；被摘要覆盖的独有节点允许搬运（其语义已由摘要节点承载，摘要为独立节点不随归档移动）；共享前缀节点与其他分支共享的节点不动；分支指针删除。归档节点仍可恢复（恢复操作预留给 v1.2）。每次归档写入审计日志。后置：`archive_check` 三条件保持不变；独有 pin 节点保留在热区（pin 语义优先）。O(路径长) |
+| 16 | archive_branch | `archive_branch(branch) → {archived: string[]}` | 前置：`archive_check(branch).eligible` 必须为 true，否则错；不能归档当前分支。语义：将该分支**独有**节点（经过该节点的分支 head 数 == 1、且无 pin）移入 `archive` 区；被摘要覆盖的独有节点允许搬运（其语义已由摘要节点承载，摘要为独立节点不随归档移动）；共享前缀节点与其他分支共享的节点不动；分支指针删除。归档节点仍可查询，显式恢复操作留待后续版本。每次归档写入审计日志。后置：`archive_check` 三条件保持不变；独有 pin 节点保留在热区（pin 语义优先）。O(路径长) |
 
 ---
 
@@ -348,6 +370,10 @@ timeline 级：`watermark`（默认 null）、`archive`（默认空 map）；
 node 级：`summary_version`（默认 1）、`supersedes`（默认 null）、
 `derived_from`（默认空数组）、`stale`（默认 false，派生）。
 
+**v1.2 新增字段**：node 级 `intent`（默认 null），适用于热区 `nodes` 与冷区 `archive`。
+完整标注属于源数据；`message.intent_tag` 只用于上下文输出，不写入数据库。
+旧数据库可直接读取；旧版本程序不保证保留新增标注，有标注的数据应使用 v1.2 或更新版本读写。
+
 ### 6.2 写入语义
 
 - **原子写**：写临时文件 → fsync → rename 覆盖。任何时刻 DB 文件都是完整快照。
@@ -357,6 +383,8 @@ node 级：`summary_version`（默认 1）、`supersedes`（默认 null）、
 - **文件权限**：新建 DB 文件权限 `0600`（对话内容是隐私）。
 - **损坏恢复**：启动时校验 `format_version`；版本不匹配或 JSON 损坏 → 报错并指引用 `.bak` 恢复，
   不得静默覆盖。
+  热区、冷区的 `intent` 也须满足 §3.2；非法标注属于源数据损坏，必须在执行变更前拒绝，
+  保留原数据库和已有备份，不得将非法标注清空后继续写入。
 - **增量 checkpoint（v1.1 新增，推荐）**：除全量原子写快照外，实现**可以**维护 append-only
   的增量操作日志（自上次全量 checkpoint 后的操作序列）；启动时先载入最近快照再 replay 日志。
   增量日志本身也要求原子追加；何时做全量 checkpoint 由实现决定（建议按操作数或时间阈值），
@@ -374,8 +402,8 @@ node 级：`summary_version`（默认 1）、`supersedes`（默认 null）、
 
 | 类别 | 字段 | 说明 |
 |------|------|------|
-| 源数据（必须落盘） | nodes 的 message/parent/children/pinned/summary_range/summary_version/supersedes/derived_from；branches；watermark；archive；next_* 计数器；审计日志 | 丢失不可重建 |
-| 派生数据（可重建，落盘可选） | prefix_tokens；covers 索引（节点→覆盖它的摘要列表）；refcount；占位复用索引；stale 标记 | 启动时由源数据重建；损坏时可丢弃重建，不得因此报错 |
+| 源数据（必须落盘） | nodes 的 message/parent/children/pinned/summary_range/summary_version/supersedes/derived_from/intent；branches；watermark；archive；next_* 计数器；审计日志 | 丢失不可重建 |
+| 派生数据（可重建，落盘可选） | prefix_tokens；covers 索引（节点→覆盖它的摘要列表）；refcount；占位复用索引；含 intent 的摘要参数索引；stale 标记 | 启动时由源数据重建；损坏时可丢弃重建，不得因此报错 |
 
 损坏恢复时派生数据不一致 → 静默重建，不得视为 DB 损坏。
 
@@ -386,7 +414,7 @@ node 级：`summary_version`（默认 1）、`supersedes`（默认 null）、
 ### 7.1 协议
 
 - 传输：stdio 上的 JSON-RPC 2.0。兼容 MCP `2024-11-05` 及以后。
-- 握手：`initialize` → 返回 `serverInfo: {name:"timeline", version:"1.1.0"}`；
+- 握手：`initialize` → 返回 `serverInfo: {name:"timeline", version:"1.2.0"}`（版本取自 Cargo 包）；
   `notifications/initialized`；`tools/list` 返回 14 个工具；`tools/call` 执行；
   `ping` 保活。
 - **幂等键**：所有 `tools/call` 接受可选 `idempotency_key: string`；
@@ -404,19 +432,22 @@ node 级：`summary_version`（默认 1）、`supersedes`（默认 null）、
 | 工具名 | 输入（除 timeline_id） | 输出 |
 |--------|----------------------|------|
 | `timeline_create` | — | `{"timeline_id":"tl0"}` |
-| `timeline_append` | `role`（枚举）, `text`, `tokens?` | `{"node":"n12"}` |
+| `timeline_append` | `role`（枚举）, `text`, `tokens?`, `intent?` | `{"node":"n12"}` |
 | `timeline_fork` | `node`, `name` | `{"branch":"追问引理2","head":"n5"}` |
 | `timeline_switch` | `name` | `{"current_branch":"追问引理2"}` |
 | `timeline_drop_branch` | `name` | `{"dropped":"追问引理2"}` |
-| `timeline_context` | `node` | `[{"role":"user","text":"…","tokens":20}, …]`（旧→新） |
+| `timeline_context` | `node` | `[{"role":"user","text":"…","tokens":20}, …]`（旧→新；有标注的消息另含 `intent_tag`） |
 | `timeline_context_budget` | `node`, `max_tokens`（整数 ≥0） | `{"messages":[…],"total_tokens":87,"summaries_created":["n20"]}` |
 | `timeline_pin` | `node` | `{"pinned":"n1"}` |
 | `timeline_unpin` | `node` | `{"unpinned":"n1"}` |
-| `timeline_summarize` | `from`, `to`, `summary`, `tokens?`, `derived_from?`（string[]）, `supersede?`（被替代的旧版本节点 id） | `{"node":"n21"}`。`supersede` 给出时创建新版本（旧版本保留，`supersedes` 指向上版）；`derived_from` 声明参考的摘要，用于级联 stale 标记 |
+| `timeline_summarize` | `from`, `to`, `summary`, `tokens?`, `derived_from?`（string[]）, `supersede?`（被替代的旧版本节点 id）, `intent?` | `{"node":"n21"}`。`supersede` 给出时创建新版本（旧版本保留，`supersedes` 指向上版）；`derived_from` 声明参考的摘要，用于级联 stale 标记 |
 | `timeline_branches` | — | `[{"name":"main","head":"n2","current":true}, …]` |
-| `timeline_node` | `node` | `{id,parent,children,role,text,tokens,pinned,prefix_tokens,summary_range}`（根的 role/text 为 null） |
+| `timeline_node` | `node` | `{id,parent,children,role,text,tokens,pinned,prefix_tokens,summary_range,summary_version,supersedes,derived_from,stale,intent}`（根的 role/text 为 null；intent 返回完整标注或 null） |
 | `timeline_archive_check` | `branch` | `{"eligible":true,"reasons":[]}`（v1.1 新增；语义见 §4.1） |
 | `timeline_archive_branch` | `branch` | `{"archived":["n7","n8"]}`（v1.1 新增；语义见 §4.1） |
+
+`intent` 不传表示无标注；传入时必须为 `{"tag":"非空标签","note":"可选备注"}` 形状的对象，
+不接受 null 或额外字段。`timeline_context_budget.messages` 的消息形状与 `timeline_context` 相同。
 
 示例 inputSchema（`timeline_context_budget`，其余类推）：
 
@@ -461,6 +492,8 @@ tl archive-branch --name 旧分支
 - 输出：JSON 到 stdout（与 §7.2 的输出形状一致）。
 - 错误：`{"error":"原因"}` 到 stderr，exit code 非零；成功 exit 0。
 - `--db` / `TIMELINE_DB` / 默认路径规则同 §6.1。
+- `append` 和 `summarize` 可增加 `--intent-tag "决策" [--intent-note "选择原因"]`。
+  `--intent-note` 必须与 `--intent-tag` 一起使用；省略两者表示无标注。
 
 ---
 
@@ -487,6 +520,17 @@ tl archive-branch --name 旧分支
 | 幂等键 | `axiom_idempotency_key` | When 同一 `idempotency_key` 调两次 `append`/`summarize`；Then 节点总数不变，两次返回同一 id |
 | 版本链 | `axiom_summary_version_chain` | When 用 `supersede` 修正摘要；Then 新版本 `summary_version` 递增、`supersedes` 指旧版、旧版仍可取回；`derived_from` 引用旧版的摘要被标 `stale` |
 
+v1.2 的标注回归放在 `tests/spec_v120.rs`：
+
+| 验收项 | 测试名 | Given / When / Then |
+|---|---|---|
+| 标注可选 | `axiom_intent_optional` | 载入不含 intent 的旧数据库；已有节点和新追加节点默认无标注 |
+| 标注不可变 | `axiom_intent_immutable` | append/fork/pin/summarize 后，旧节点的完整 intent 保持不变 |
+| 摘要去重 | `summary_deduplication_distinguishes_intent_before_and_after_reload` | 相同区间、文本但不同 tag/note 得到不同节点；同参重试在重启前后均复用原节点 |
+| 源数据保护 | `invalid_persisted_intent_rejects_hot_and_cold_data_without_overwriting` | 热区或冷区标注损坏时拒绝读取和变更，数据库与已有备份逐字节不变 |
+| 根与机械占位 | `root_and_placeholder_annotations_are_rejected` | 拒绝根或机械占位上的标注；失败不修改状态 |
+| 上下文投影 | `intent_survives_storage_roundtrip_without_persisting_output_fields` | 存储后重新读取，context/budget 仅输出 tag；完整 intent 保存于节点，message 不持久化 intent_tag |
+
 **冒烟测试**（CLI + MCP，脚本化，参考实现已跑通）：
 `initialize → tools/list（14 个）→ create → append×2 → fork → switch → append → branches → context → context_budget → pin → node → 错误用例（fork 不存在的节点应返回 JSON-RPC error）`。
 
@@ -496,6 +540,8 @@ tl archive-branch --name 旧分支
 
 1. **输入校验**：node id 必须匹配 `^n[0-9]+$`；分支名非空（允许 Unicode，禁 `/` 与空字符串）；
    `max_tokens` 为非负整数；`role` 为已知枚举（未知 role 报错，不静默接受）。
+   `intent.tag` 必须是非空字符串，词表由调用方选择；MCP 的 `intent.note` 若提供必须是字符串，
+   不接受未知标注字段。核心写入与冷热数据载入均须校验标注，根与机械占位不得带标注。
 2. **摘要审计（必做）**：所有 `summarize` 与占位创建必须写入**只增审计日志**
    （DB 内 `audit: [{ts, op, from, to, node}]` 数组或独立文件二选一，实现文档化）。
    原文节点永不删除 → 任何摘要都可回滚到原文。这是公理 6 的操作化，
@@ -534,10 +580,11 @@ tl archive-branch --name 旧分支
 | 源/派生分离（v1.1） | HDFS"可重建的状态不值得持久化"：派生索引启动重建，写放大只付给源数据 |
 | 增量 checkpoint + 幂等键（v1.1） | MillWheel 的 per-key checkpoint / exactly-once via 幂等：append-only 增量日志；MCP at-least-once 投递 + 服务端去重 |
 | 摘要版本链（v1.1） | Dataflow 的 retraction：修正 = 新版本 + 旧版保留；`derived_from` 下游级联标 stale |
+| 意图标注（v1.2） | 写入时记录意图，完整元数据不可变；上下文只携带标签，备注留给管理查询；标签词表由调用方决定 |
 
 ## 13. 交付验收清单（给验收方逐项打勾）
 
-- [ ] 单元测试全过：§9 的 15 个测试（含 fuzz property test）无失败
+- [ ] 单元测试全过：§9 的公理与标注测试（含 fuzz property test）无失败
 - [ ] 不变量检查：随机操作序列后断言 §3.4 的 10 条不变量（含 prefix_tokens 一致性）
 - [ ] CLI 全命令冒烟通过（§9 脚本），JSON 输出形状与 §7.2 一致
 - [ ] MCP 全流程通过：initialize → tools/list（14 个）→ tools/call 全工具 → 错误用例返回 JSON-RPC error
@@ -548,10 +595,17 @@ tl archive-branch --name 旧分支
 - [ ] 归档三条件：`archive_check` 逐项正确；`archive_branch` 不搬运共享节点
 - [ ] 幂等键：同一 key 重复调用不产生重复节点，返回同一 id
 - [ ] 摘要版本链：修正产生新版本且旧版可回滚；下游 `stale` 标记正确
+- [ ] 意图标注：旧数据兼容、标注不可变、摘要去重、冷热校验及上下文输出契约通过
 - [ ] 文档：在 README 中声明派生字段清单、水位语义、增量 checkpoint 策略
 - [ ] `tl-mcp --db` 与 `TIMELINE_DB` 覆盖规则实测正确
 
 ## 14. 版本与变更
+
+- TIMELINE-SPEC v1.2.0（2026-10-27）：新增可选节点 `intent`，允许 append 和 summarize
+  在创建时记录标签与备注；完整标注不可变，参与摘要去重，并在冷热数据载入时校验。
+  context/budget 仅输出可选 `intent_tag`，node 返回完整标注；根与机械占位无标注。
+  Rust 保留原调用方式，CLI 新增两个可选参数，MCP 工具数量仍为 14，工具集契约为 1.2.0；
+  `format_version=1`，旧数据缺失 intent 时按 null 读取。§9 增加标注回归要求。
 
 - TIMELINE-SPEC v1.1.2（2026-10-13）：澄清预算契约（Codex 实现 review 阻塞项 2，
   Corentin 确认）——新增 §5.5「预算不可行」：保证优先于伪码字面步骤；
@@ -574,9 +628,9 @@ tl archive-branch --name 旧分支
   ⑥ 摘要版本链与级联 stale（§3.2/§3.4 不变量 10，操作 10 扩展）。
   新增 2 个操作契约、2 个 MCP 工具；DB 新增字段全部向后兼容。
 - TIMELINE-SPEC v1.0.0（2026-10-06）：首个完整构建规格（原名 SPEC.md）。
-- `format_version=1`：DB 文件格式版本；v1.1 新增字段均为可选（缺失按缺省值解释），
+- `format_version=1`：DB 文件格式版本；v1.1/v1.2 新增字段均为可选（缺失按缺省值解释），
   不兼容变更时递增并写迁移说明。
-- MCP 工具集版本 `1.1.0`：新增工具必须向后兼容（只增不改）；破坏性变更升级大版本。
+- MCP 工具集版本 `1.2.0`：新增工具必须向后兼容（只增不改）；破坏性变更升级大版本。
 
 ---
 

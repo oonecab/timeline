@@ -495,7 +495,13 @@ impl Timeline {
         let m = node.message.as_ref().unwrap();
         if self.nodes.contains_key(id) {
             self.summary_keys.insert(
-                summary_key(range, m, &node.derived_from, node.supersedes.as_deref()),
+                summary_key(
+                    range,
+                    m,
+                    &node.derived_from,
+                    node.supersedes.as_deref(),
+                    node.intent.as_ref(),
+                ),
                 id.into(),
             );
         }
@@ -536,8 +542,9 @@ fn summary_key(
     m: &Message,
     derived: &[String],
     supersedes: Option<&str>,
+    intent: Option<&Intent>,
 ) -> String {
-    serde_json::to_string(&(range, m, derived, supersedes)).expect("serializing primitives")
+    serde_json::to_string(&(range, m, derived, supersedes, intent)).expect("serializing primitives")
 }
 impl Database {
     pub fn timeline(&self, id: &str) -> Result<&Timeline> {
@@ -672,7 +679,13 @@ impl Database {
             .parent
             .clone()
             .ok_or_else(|| Error::new("cannot summarize the root node".into()))?;
-        let key = summary_key(&range, &msg, &derived_from, supersede.as_deref());
+        let key = summary_key(
+            &range,
+            &msg,
+            &derived_from,
+            supersede.as_deref(),
+            intent.as_ref(),
+        );
         if let Some(existing) = t.summary_keys.get(&key) {
             return Ok(existing.clone());
         }
@@ -719,6 +732,9 @@ impl Database {
             stale: false,
             intent,
         };
+        if node.is_placeholder() && node.intent.is_some() {
+            return err("placeholder must have no intent");
+        }
         let t = self.timeline_mut(tl)?;
         t.insert_node(node);
         t.index_summary(&id)?;
@@ -989,16 +1005,8 @@ impl Database {
                     tokens: RESERVE,
                     intent_tag: None,
                 };
-                let id = self.add_summary(
-                    tl,
-                    &path[a],
-                    &path[b],
-                    msg,
-                    Vec::new(),
-                    None,
-                    None,
-                    true,
-                )?;
+                let id =
+                    self.add_summary(tl, &path[a], &path[b], msg, Vec::new(), None, None, true)?;
                 created_ends.insert(b);
                 id
             };
@@ -1081,6 +1089,10 @@ impl Timeline {
             validate_node_id(id)?;
             if id != &n.id {
                 return err("node identity mismatch");
+            }
+            validate_intent(&n.intent)?;
+            if n.intent.is_some() && (n.parent.is_none() || n.is_placeholder()) {
+                return err("root and placeholder must have no intent");
             }
             if n.parent.is_none() {
                 roots.push(id.clone());
